@@ -5,7 +5,7 @@ Cleaned & Error-Free Version
 
 import os
 from dotenv import load_dotenv
-from flask import Flask
+from flask import Flask, g, has_request_context
 from flask_cors import CORS
 import mysql.connector
 from datetime import timedelta
@@ -100,23 +100,7 @@ def find_working_config(params):
 
     conn_configs = []
     if not ssl_disabled:
-        # 1. Standard SSL with trusted CA bundle (TiDB Cloud / Aiven)
-        cfg_ssl_ca = {
-            'host': params['host'],
-            'user': params['user'],
-            'password': params['password'],
-            'database': params['database'],
-            'port': params['port'],
-            'autocommit': True,
-            'connection_timeout': 5,
-            'ssl_disabled': False
-        }
-        if ca_path and os.path.exists(ca_path):
-            cfg_ssl_ca['ssl_ca'] = ca_path
-            cfg_ssl_ca['ssl_verify_cert'] = True
-        conn_configs.append(cfg_ssl_ca)
-
-        # 2. SSL fallback without strict cert verification (in case cloud provider cert chain issues)
+        # 1. Cloud SSL with ssl_verify_cert=False (instant connection for TiDB Cloud Serverless / Aiven)
         conn_configs.append({
             'host': params['host'],
             'user': params['user'],
@@ -128,6 +112,21 @@ def find_working_config(params):
             'ssl_disabled': False,
             'ssl_verify_cert': False
         })
+
+        # 2. Standard SSL with trusted CA bundle if explicitly provided
+        if ca_path and os.path.exists(ca_path):
+            conn_configs.append({
+                'host': params['host'],
+                'user': params['user'],
+                'password': params['password'],
+                'database': params['database'],
+                'port': params['port'],
+                'autocommit': True,
+                'connection_timeout': 5,
+                'ssl_disabled': False,
+                'ssl_ca': ca_path,
+                'ssl_verify_cert': True
+            })
 
     # 3. Fallback without SSL (for localhost or non-SSL databases)
     conn_configs.append({
@@ -181,26 +180,33 @@ def get_db_pool():
         try:
             pool_config = dict(working_cfg)
             pool_config['pool_name'] = "outpass_pool"
-            pool_config['pool_size'] = 5
-            pool_config['pool_reset_session'] = True
+            pool_config['pool_size'] = 10
+            # TiDB does not support COM_RESET_CONNECTION; must be False for seamless pooling
+            pool_config['pool_reset_session'] = False
             _db_pool = pooling.MySQLConnectionPool(**pool_config)
-            print("[OK] Initialized persistent MySQL connection pool (size=5)")
+            print("[OK] Initialized persistent MySQL connection pool (size=10, reset_session=False)")
             return _db_pool
         except Exception as e:
             print(f"[WARN] Connection pool initialization failed, will use direct connections: {e}")
             return None
 
 
-def get_db_connection():
-    """Returns an active database connection from the persistent pool (or direct fallback)."""
+def _create_raw_connection():
+    """Internal helper to acquire a connection from pool or direct connect."""
     pool = get_db_pool()
     if pool:
         try:
             conn = pool.get_connection()
+            if conn:
+                try:
+                    conn.ping(reconnect=True, attempts=2, delay=0.5)
+                except Exception:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+                    conn = None
             if conn and conn.is_connected():
-                return conn
-            elif conn:
-                conn.ping(reconnect=True, attempts=2, delay=1)
                 return conn
         except Exception as pool_err:
             print(f"[WARN] Pool checkout warning: {pool_err}")
@@ -220,6 +226,27 @@ def get_db_connection():
             print(f"[ERROR] Direct database connection failed: {dir_err}")
 
     return None
+
+
+def get_db_connection():
+    """Returns an active database connection from persistent pool (or direct fallback)."""
+    conn = _create_raw_connection()
+    if conn and has_request_context():
+        g.db_conn = conn
+    return conn
+
+
+@app.teardown_appcontext
+def close_db_connection(exception=None):
+    """Guarantees returned connections are closed/released at end of request."""
+    if has_request_context():
+        conn = g.pop('db_conn', None)
+        if conn is not None:
+            try:
+                if conn.is_connected():
+                    conn.close()
+            except Exception:
+                pass
 
 
 # ================= INIT DB FUNCTION =================

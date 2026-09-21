@@ -9,7 +9,50 @@ var app = window.app = {
     formatTime: formatTime,
     formatYear: formatYear,
     getStatusBadge: getStatusBadge,
-    showQRModal: showQRModal
+    showQRModal: showQRModal,
+    _apiCache: new Map(),
+    clearApiCache: function () {
+        if (window.app && window.app._apiCache) {
+            window.app._apiCache.clear();
+        }
+    }
+};
+
+// Intelligent client-side API caching with auto-invalidation on mutations
+const _nativeFetch = window.fetch;
+window.fetch = async function (resource, init = {}) {
+    const method = (init.method || 'GET').toUpperCase();
+    const url = typeof resource === 'string' ? resource : (resource.url || '');
+
+    // Any mutation (POST, PUT, DELETE) immediately clears the cache so data stays fresh
+    if (method !== 'GET') {
+        app.clearApiCache();
+        return _nativeFetch.apply(this, arguments);
+    }
+
+    // Cache internal GET requests for up to 15 seconds for instantaneous tab switches
+    if (url.includes('/api/')) {
+        const now = Date.now();
+        const cached = app._apiCache.get(url);
+        if (cached && (now - cached.timestamp < 15000)) {
+            return cached.response.clone();
+        }
+
+        const resp = await _nativeFetch.apply(this, arguments);
+        if (resp && resp.ok) {
+            try {
+                app._apiCache.set(url, {
+                    timestamp: Date.now(),
+                    response: resp.clone()
+                });
+            } catch (e) {
+                // Ignore clone errors on streamed bodies
+            }
+        }
+        return resp;
+    }
+
+    return _nativeFetch.apply(this, arguments);
 };
 
 // Current user data
@@ -624,9 +667,43 @@ function handleNavigation(e) {
     loadModule(module);
 }
 
+let _activeModuleLoadId = 0;
+
+function showModuleLoadingIndicator() {
+    const progressBar = document.getElementById('moduleProgressBar');
+    if (progressBar) progressBar.classList.add('active');
+}
+
+function hideModuleLoadingIndicator() {
+    const progressBar = document.getElementById('moduleProgressBar');
+    if (progressBar) progressBar.classList.remove('active');
+    const content = document.getElementById('moduleContent');
+    if (content) content.style.opacity = '1';
+}
+
+function showModuleErrorUI(module, error) {
+    hideModuleLoadingIndicator();
+    const content = document.getElementById('moduleContent');
+    if (content) {
+        content.innerHTML = `
+            <div class="card" style="padding: 2.5rem; text-align: center;">
+                <i class="ph ph-warning-circle" style="font-size: 3rem; color: var(--danger); margin-bottom: 1rem;"></i>
+                <h3 style="margin-bottom: 0.5rem;">Failed to load section</h3>
+                <p style="color: var(--text-muted); margin-bottom: 1.5rem;">${error.message || 'An error occurred while loading this section.'}</p>
+                <button onclick="app.clearApiCache(); loadModule('${module}')" class="btn-modern btn-modern-primary" style="margin: 0 auto; width: auto;">
+                    <i class="ph ph-arrow-clockwise"></i> Try Again
+                </button>
+            </div>
+        `;
+    }
+}
+
 // Load module content
 function loadModule(module) {
     const content = document.getElementById('moduleContent');
+    if (!content) return;
+
+    const currentLoadId = ++_activeModuleLoadId;
 
     // Save current module to localStorage for persistence on refresh
     localStorage.setItem('currentModule', module);
@@ -639,88 +716,146 @@ function loadModule(module) {
         }
     });
 
-    // For purely client-side modules, don't show any loading screen to render instantly
+    // Purely client-side modules
     const clientSideModules = ['apply-outpass', 'scan-qr'];
-    if (!clientSideModules.includes(module)) {
-        content.innerHTML = `
-            <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 260px; gap: 12px; animation: fadeIn 0.2s ease-out;">
-                <i class="ph ph-circle-notch ph-spin" style="font-size: 32px; color: var(--primary);"></i>
-                <span style="font-size: 14px; font-weight: 500; color: var(--text-muted);">Loading...</span>
-            </div>
-        `;
+    const isClientSide = clientSideModules.includes(module);
+
+    showModuleLoadingIndicator();
+
+    const hasExistingContent = content.innerHTML.trim().length > 0 && !content.innerHTML.includes('ph-circle-notch');
+
+    if (!isClientSide) {
+        if (hasExistingContent) {
+            // Smooth non-blanking transition: dim slightly and show top progress bar
+            content.style.opacity = '0.65';
+        } else {
+            // First load or empty: show sleek centered spinner
+            content.innerHTML = `
+                <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 260px; gap: 12px; animation: fadeIn 0.2s ease-out;">
+                    <i class="ph ph-circle-notch ph-spin" style="font-size: 32px; color: var(--primary);"></i>
+                    <span style="font-size: 14px; font-weight: 500; color: var(--text-muted);">Loading...</span>
+                </div>
+            `;
+        }
     }
 
+    // Safety timeout: if server takes > 10s, show retry UI instead of hanging forever
+    const timeoutId = setTimeout(() => {
+        if (currentLoadId === _activeModuleLoadId) {
+            if (content.innerHTML.includes('ph-circle-notch') || content.style.opacity === '0.65') {
+                content.innerHTML = `
+                    <div class="card" style="padding: 2.5rem; text-align: center;">
+                        <i class="ph ph-clock-countdown" style="font-size: 3rem; color: var(--warning); margin-bottom: 1rem;"></i>
+                        <h3 style="margin-bottom: 0.5rem;">Connection taking longer than expected</h3>
+                        <p style="color: var(--text-muted); margin-bottom: 1.5rem;">The cloud server is taking a moment to respond. Click below to retry.</p>
+                        <button onclick="app.clearApiCache(); loadModule('${module}')" class="btn-modern btn-modern-primary" style="margin: 0 auto; width: auto;">
+                            <i class="ph ph-arrow-clockwise"></i> Retry Now
+                        </button>
+                    </div>
+                `;
+                hideModuleLoadingIndicator();
+            }
+        }
+    }, 10000);
+
     // Call appropriate function based on module
-    switch (module) {
-        // Student modules
-        case 'student-dashboard':
-            loadStudentDashboard();
-            break;
-        case 'apply-outpass':
-            loadApplyOutpass();
-            break;
-        case 'my-outpasses':
-            loadMyOutpasses();
-            break;
-        case 'my-history':
-            loadMyHistory();
-            break;
+    let modulePromise = null;
+    try {
+        switch (module) {
+            // Student modules
+            case 'student-dashboard':
+                modulePromise = loadStudentDashboard();
+                break;
+            case 'apply-outpass':
+                modulePromise = loadApplyOutpass();
+                break;
+            case 'my-outpasses':
+                modulePromise = loadMyOutpasses();
+                break;
+            case 'my-history':
+                modulePromise = loadMyHistory();
+                break;
 
-        // Staff modules
-        case 'staff-dashboard':
-            loadStaffDashboard();
-            break;
-        case 'pending-requests':
-            loadPendingRequests();
-            break;
-        case 'my-students':
-            loadMyStudents();
-            break;
+            // Staff modules
+            case 'staff-dashboard':
+                modulePromise = loadStaffDashboard();
+                break;
+            case 'pending-requests':
+                modulePromise = loadPendingRequests();
+                break;
+            case 'my-students':
+                modulePromise = loadMyStudents();
+                break;
 
-        // HOD modules
-        case 'hod-dashboard':
-            loadHODDashboard();
-            break;
-        case 'hod-approvals':
-            loadHODApprovals();
-            break;
-        case 'dept-statistics':
-            loadDeptStatistics();
-            break;
-        case 'all-outpasses':
-            loadAllOutpasses();
-            break;
+            // HOD modules
+            case 'hod-dashboard':
+                modulePromise = loadHODDashboard();
+                break;
+            case 'hod-approvals':
+                modulePromise = loadHODApprovals();
+                break;
+            case 'dept-statistics':
+                modulePromise = loadDeptStatistics();
+                break;
+            case 'all-outpasses':
+                modulePromise = loadAllOutpasses();
+                break;
 
-        // Security modules
-        case 'security-dashboard':
-            loadSecurityDashboard();
-            break;
-        case 'scan-qr':
-            loadScanQR();
-            break;
-        case 'students-out':
-            loadStudentsOut();
-            break;
-        case 'recent-activity':
-            loadRecentActivity();
-            break;
+            // Security modules
+            case 'security-dashboard':
+                modulePromise = loadSecurityDashboard();
+                break;
+            case 'scan-qr':
+                modulePromise = loadScanQR();
+                break;
+            case 'students-out':
+                modulePromise = loadStudentsOut();
+                break;
+            case 'recent-activity':
+                modulePromise = loadRecentActivity();
+                break;
 
-        // Admin modules
-        case 'admin-dashboard':
-            loadAdminDashboard();
-            break;
-        case 'manage-users':
-            loadManageUsers();
-            break;
-        case 'manage-departments':
-            loadManageDepartments();
-            break;
-        case 'system-reports':
-            loadSystemReports();
-            break;
+            // Admin modules
+            case 'admin-dashboard':
+                modulePromise = loadAdminDashboard();
+                break;
+            case 'manage-users':
+                modulePromise = loadManageUsers();
+                break;
+            case 'manage-departments':
+                modulePromise = loadManageDepartments();
+                break;
+            case 'system-reports':
+                modulePromise = loadSystemReports();
+                break;
 
-        default:
-            content.innerHTML = '<div class="card"><p>Module not found</p></div>';
+            default:
+                content.innerHTML = '<div class="card"><p>Module not found</p></div>';
+        }
+
+        if (modulePromise && typeof modulePromise.then === 'function') {
+            modulePromise
+                .then(() => {
+                    if (currentLoadId === _activeModuleLoadId) {
+                        clearTimeout(timeoutId);
+                        hideModuleLoadingIndicator();
+                    }
+                })
+                .catch(err => {
+                    if (currentLoadId === _activeModuleLoadId) {
+                        clearTimeout(timeoutId);
+                        console.error('Module load error:', err);
+                        showModuleErrorUI(module, err);
+                    }
+                });
+        } else {
+            clearTimeout(timeoutId);
+            hideModuleLoadingIndicator();
+        }
+    } catch (err) {
+        clearTimeout(timeoutId);
+        console.error('Synchronous module load error:', err);
+        showModuleErrorUI(module, err);
     }
 }
 

@@ -16,6 +16,8 @@ admin_bp = Blueprint('admin', __name__, url_prefix='/api/admin')
 @role_required('admin')
 def get_all_users():
     """Get all users with optional role filter"""
+    conn = None
+    cursor = None
     try:
         role_filter = request.args.get('role')
         
@@ -55,12 +57,11 @@ def get_all_users():
         cursor.execute(query, params)
         users = cursor.fetchall()
         
-        # Format dates
+        # Format dates and safeguard fields
         for user in users:
             user['created_at'] = format_datetime(user['created_at'])
-        
-        cursor.close()
-        conn.close()
+            if not user.get('full_name'):
+                user['full_name'] = user.get('username') or 'User'
         
         return jsonify({
             'success': True,
@@ -70,6 +71,17 @@ def get_all_users():
     except Exception as e:
         print(f"Get users error: {e}")
         return jsonify({'success': False, 'message': 'Failed to fetch users'}), 500
+    finally:
+        if cursor:
+            try:
+                cursor.close()
+            except Exception:
+                pass
+        if conn and conn.is_connected():
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 @admin_bp.route('/add-user', methods=['POST'])
 @role_required('admin')
@@ -330,6 +342,8 @@ def reset_user_password(user_id):
 @admin_bp.route('/departments', methods=['GET'])
 def get_departments():
     """Get all departments"""
+    conn = None
+    cursor = None
     try:
         conn = get_db_connection()
         if not conn:
@@ -353,9 +367,6 @@ def get_departments():
         for dept in departments:
             dept['created_at'] = format_datetime(dept['created_at'])
         
-        cursor.close()
-        conn.close()
-        
         return jsonify({
             'success': True,
             'departments': departments
@@ -364,6 +375,17 @@ def get_departments():
     except Exception as e:
         print(f"Get departments error: {e}")
         return jsonify({'success': False, 'message': 'Failed to fetch departments'}), 500
+    finally:
+        if cursor:
+            try:
+                cursor.close()
+            except Exception:
+                pass
+        if conn and conn.is_connected():
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 @admin_bp.route('/add-department', methods=['POST'])
 @role_required('admin')
@@ -560,6 +582,8 @@ def assign_advisor():
 @role_required('admin')
 def get_system_report():
     """Get comprehensive system statistics and report"""
+    conn = None
+    cursor = None
     try:
         from_date = request.args.get('from_date', (get_ist_now() - timedelta(days=30)).strftime('%Y-%m-%d'))
         to_date = request.args.get('to_date', get_ist_now().strftime('%Y-%m-%d'))
@@ -593,6 +617,12 @@ def get_system_report():
             WHERE created_at BETWEEN %s AND %s
         """, (from_date, to_date))
         outpass_stats = cursor.fetchone()
+        if not outpass_stats:
+            outpass_stats = {'total': 0, 'pending': 0, 'approved': 0, 'rejected': 0, 'used': 0}
+        else:
+            for k in ['total', 'pending', 'approved', 'rejected', 'used']:
+                if outpass_stats.get(k) is None:
+                    outpass_stats[k] = 0
         
         # Department-wise statistics
         cursor.execute("""
@@ -628,9 +658,7 @@ def get_system_report():
             AND created_at BETWEEN %s AND %s
         """, (from_date, to_date))
         misuse = cursor.fetchone()
-        
-        cursor.close()
-        conn.close()
+        misuse_count = misuse['misuse_count'] if (misuse and misuse.get('misuse_count') is not None) else 0
         
         return jsonify({
             'success': True,
@@ -640,13 +668,24 @@ def get_system_report():
                 'outpasses': outpass_stats,
                 'departments': dept_stats,
                 'top_reasons': top_reasons,
-                'misuse_attempts': misuse['misuse_count']
+                'misuse_attempts': misuse_count
             }
         }), 200
         
     except Exception as e:
         print(f"Get system report error: {e}")
         return jsonify({'success': False, 'message': 'Failed to generate report'}), 500
+    finally:
+        if cursor:
+            try:
+                cursor.close()
+            except Exception:
+                pass
+        if conn and conn.is_connected():
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 @admin_bp.route('/export-report', methods=['GET'])
 @role_required('admin')

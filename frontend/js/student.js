@@ -324,10 +324,27 @@ async function loadMyOutpasses() {
             html += `</tbody></table></div></div>`;
             document.getElementById('moduleContent').innerHTML = html;
         } else {
-            document.getElementById('moduleContent').innerHTML = `<div class="glass-panel"><p style="color: var(--error);">${data.message || 'Error loading records'}</p></div>`;
+            document.getElementById('moduleContent').innerHTML = `
+                <div class="glass-panel" style="padding: 2.5rem; text-align: center;">
+                    <i class="ph ph-warning-circle" style="font-size: 3rem; color: var(--error); margin-bottom: 1rem;"></i>
+                    <h3 style="margin-bottom: 0.5rem;">Failed to load outpasses</h3>
+                    <p style="color: var(--text-muted); margin-bottom: 1.5rem;">${data.message || 'Error loading records'}</p>
+                    <button onclick="loadMyOutpasses()" class="btn-modern btn-modern-primary" style="margin: 0 auto; width: auto;">
+                        <i class="ph ph-arrow-clockwise"></i> Try Again
+                    </button>
+                </div>`;
         }
     } catch (error) {
         console.error('Error loading outpasses:', error);
+        document.getElementById('moduleContent').innerHTML = `
+            <div class="glass-panel" style="padding: 2.5rem; text-align: center;">
+                <i class="ph ph-warning-circle" style="font-size: 3rem; color: var(--error); margin-bottom: 1rem;"></i>
+                <h3 style="margin-bottom: 0.5rem;">Failed to load outpasses</h3>
+                <p style="color: var(--text-muted); margin-bottom: 1.5rem;">${error.message || 'Network error occurred while fetching your records.'}</p>
+                <button onclick="loadMyOutpasses()" class="btn-modern btn-modern-primary" style="margin: 0 auto; width: auto;">
+                    <i class="ph ph-arrow-clockwise"></i> Try Again
+                </button>
+            </div>`;
     }
 }
 

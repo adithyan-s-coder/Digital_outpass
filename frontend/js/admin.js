@@ -6,7 +6,8 @@ async function loadAdminDashboard() {
         const data = await response.json();
 
         if (data.success) {
-            const report = data.report;
+            const report = data.report || {};
+            const outpasses = report.outpasses || {};
             document.getElementById('moduleContent').innerHTML = `
                 <div class="mb-8" style="animation: fadeIn 0.4s ease-out;">
                     <h2 class="login-title" style="font-size: 2.25rem;">Admin Central</h2>
@@ -17,14 +18,14 @@ async function loadAdminDashboard() {
                     <div class="modern-card">
                         <div class="stat-icon"><i class="ph ph-shield-check"></i></div>
                         <div>
-                            <div class="stat-value">${report.outpasses.total || 0}</div>
+                            <div class="stat-value">${outpasses.total || 0}</div>
                             <div class="stat-label">Total Logs</div>
                         </div>
                     </div>
                     <div class="modern-card">
                         <div class="stat-icon" style="background: rgba(245, 158, 11, 0.1); color: var(--warning);"><i class="ph ph-warning-circle"></i></div>
                         <div>
-                            <div class="stat-value">${report.outpasses.pending || 0}</div>
+                            <div class="stat-value">${outpasses.pending || 0}</div>
                             <div class="stat-label">System Pending</div>
                         </div>
                     </div>
@@ -55,10 +56,27 @@ async function loadAdminDashboard() {
                 </div>
             `;
         } else {
-            document.getElementById('moduleContent').innerHTML = `<div class="card"><p>${data.message || 'Error loading dashboard'}</p></div>`;
+            document.getElementById('moduleContent').innerHTML = `
+                <div class="card" style="padding: 2.5rem; text-align: center;">
+                    <i class="ph ph-warning-circle" style="font-size: 3rem; color: var(--danger); margin-bottom: 1rem;"></i>
+                    <h3 style="margin-bottom: 0.5rem;">Failed to load dashboard</h3>
+                    <p style="color: var(--text-muted); margin-bottom: 1.5rem;">${data.message || 'Error loading dashboard'}</p>
+                    <button onclick="loadAdminDashboard()" class="btn-modern btn-modern-primary" style="margin: 0 auto; width: auto;">
+                        <i class="ph ph-arrow-clockwise"></i> Try Again
+                    </button>
+                </div>`;
         }
     } catch (error) {
-        console.error('Error:', error);
+        console.error('Error loading dashboard:', error);
+        document.getElementById('moduleContent').innerHTML = `
+            <div class="card" style="padding: 2.5rem; text-align: center;">
+                <i class="ph ph-warning-circle" style="font-size: 3rem; color: var(--danger); margin-bottom: 1rem;"></i>
+                <h3 style="margin-bottom: 0.5rem;">Failed to load dashboard</h3>
+                <p style="color: var(--text-muted); margin-bottom: 1.5rem;">${error.message || 'Network error occurred while fetching dashboard statistics.'}</p>
+                <button onclick="loadAdminDashboard()" class="btn-modern btn-modern-primary" style="margin: 0 auto; width: auto;">
+                    <i class="ph ph-arrow-clockwise"></i> Try Again
+                </button>
+            </div>`;
     }
 }
 
@@ -126,15 +144,18 @@ async function loadManageUsers() {
                     `${user.dept_code || 'N/A'}${user.academic_year ? ` (Yr ${user.academic_year})` : ''}` :
                     (user.dept_code || '-');
 
+                const displayName = (user.full_name || user.username || 'User').trim();
+                const initial = displayName.charAt(0).toUpperCase();
+
                 html += `
                     <tr data-role="${user.role}">
                         <td>
                             <div style="display: flex; align-items: center; gap: 12px;">
                                 <div style="width: 36px; height: 36px; border-radius: 50%; background: #f1f5f9; display: flex; align-items: center; justify-content: center; font-weight: 700; color: var(--primary);">
-                                    ${user.full_name.charAt(0)}
+                                    ${initial}
                                 </div>
                                 <div>
-                                    <div style="font-weight: 600;">${user.full_name}</div>
+                                    <div style="font-weight: 600;">${displayName}</div>
                                     <div style="font-size: 12px; color: var(--text-muted);">${user.registration_no || ''}</div>
                                 </div>
                             </div>
@@ -172,10 +193,27 @@ async function loadManageUsers() {
             html += `</tbody></table></div></div>`;
             document.getElementById('moduleContent').innerHTML = html;
         } else {
-            document.getElementById('moduleContent').innerHTML = `<div class="card"><p>${data.message || 'Error loading users'}</p></div>`;
+            document.getElementById('moduleContent').innerHTML = `
+                <div class="card" style="padding: 2.5rem; text-align: center;">
+                    <i class="ph ph-warning-circle" style="font-size: 3rem; color: var(--danger); margin-bottom: 1rem;"></i>
+                    <h3 style="margin-bottom: 0.5rem;">Failed to load users</h3>
+                    <p style="color: var(--text-muted); margin-bottom: 1.5rem;">${data.message || 'Error loading users'}</p>
+                    <button onclick="loadManageUsers()" class="btn-modern btn-modern-primary" style="margin: 0 auto; width: auto;">
+                        <i class="ph ph-arrow-clockwise"></i> Try Again
+                    </button>
+                </div>`;
         }
     } catch (error) {
-        console.error('Error:', error);
+        console.error('Error loading users:', error);
+        document.getElementById('moduleContent').innerHTML = `
+            <div class="card" style="padding: 2.5rem; text-align: center;">
+                <i class="ph ph-warning-circle" style="font-size: 3rem; color: var(--danger); margin-bottom: 1rem;"></i>
+                <h3 style="margin-bottom: 0.5rem;">Failed to load users</h3>
+                <p style="color: var(--text-muted); margin-bottom: 1.5rem;">${error.message || 'Network error occurred while fetching users.'}</p>
+                <button onclick="loadManageUsers()" class="btn-modern btn-modern-primary" style="margin: 0 auto; width: auto;">
+                    <i class="ph ph-arrow-clockwise"></i> Try Again
+                </button>
+            </div>`;
     }
 }
 
@@ -540,10 +578,27 @@ async function loadManageDepartments() {
             html += `</tbody></table></div></div>`;
             document.getElementById('moduleContent').innerHTML = html;
         } else {
-            document.getElementById('moduleContent').innerHTML = `<div class="card"><p>${data.message || 'Error loading departments'}</p></div>`;
+            document.getElementById('moduleContent').innerHTML = `
+                <div class="card" style="padding: 2.5rem; text-align: center;">
+                    <i class="ph ph-warning-circle" style="font-size: 3rem; color: var(--danger); margin-bottom: 1rem;"></i>
+                    <h3 style="margin-bottom: 0.5rem;">Failed to load departments</h3>
+                    <p style="color: var(--text-muted); margin-bottom: 1.5rem;">${data.message || 'Error loading departments'}</p>
+                    <button onclick="loadManageDepartments()" class="btn-modern btn-modern-primary" style="margin: 0 auto; width: auto;">
+                        <i class="ph ph-arrow-clockwise"></i> Try Again
+                    </button>
+                </div>`;
         }
     } catch (error) {
-        console.error('Error:', error);
+        console.error('Error loading departments:', error);
+        document.getElementById('moduleContent').innerHTML = `
+            <div class="card" style="padding: 2.5rem; text-align: center;">
+                <i class="ph ph-warning-circle" style="font-size: 3rem; color: var(--danger); margin-bottom: 1rem;"></i>
+                <h3 style="margin-bottom: 0.5rem;">Failed to load departments</h3>
+                <p style="color: var(--text-muted); margin-bottom: 1.5rem;">${error.message || 'Network error occurred while fetching departments.'}</p>
+                <button onclick="loadManageDepartments()" class="btn-modern btn-modern-primary" style="margin: 0 auto; width: auto;">
+                    <i class="ph ph-arrow-clockwise"></i> Try Again
+                </button>
+            </div>`;
     }
 }
 
@@ -656,12 +711,15 @@ async function loadSystemReports() {
         const data = await response.json();
 
         if (data.success) {
-            const report = data.report;
+            const report = data.report || {};
+            const period = report.period || {};
+            const outpasses = report.outpasses || {};
+            const users = report.users || [];
             let html = `
                 <div class="mb-8" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
                     <div>
                         <h2 class="login-title" style="font-size: 2rem;">System Audit Report</h2>
-                        <p style="color: var(--text-muted); font-size: 0.875rem;">Period: ${app.formatDate(report.period.from)} — ${app.formatDate(report.period.to)}</p>
+                        <p style="color: var(--text-muted); font-size: 0.875rem;">Period: ${period.from ? app.formatDate(period.from) : 'Recent'} — ${period.to ? app.formatDate(period.to) : 'Present'}</p>
                     </div>
                     <button onclick="exportReport()" class="btn-modern btn-modern-primary" style="width: auto;">
                         <i class="ph ph-download-simple"></i> Export CSV
@@ -678,7 +736,7 @@ async function loadSystemReports() {
                                 <tbody>
             `;
 
-            report.users.forEach(u => {
+            users.forEach(u => {
                 html += `<tr><td style="font-weight: 600; text-transform: capitalize;">${u.role}</td><td>${u.count} Users</td><td><span class="status-badge badge-approved">${u.active_count} Active</span></td></tr>`;
             });
 
@@ -693,19 +751,19 @@ async function loadSystemReports() {
                         <h3 style="font-size: 1.125rem; font-weight: 600; margin-bottom: 0.25rem;">Outpass Summary</h3>
                         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1rem;">
                             <div class="modern-card" style="padding: 16px;">
-                                <div class="stat-value" style="font-size: 24px;">${report.outpasses.total || 0}</div>
+                                <div class="stat-value" style="font-size: 24px;">${outpasses.total || 0}</div>
                                 <div class="stat-label">Total Applications</div>
                             </div>
                             <div class="modern-card" style="padding: 16px; border-left: 4px solid var(--warning);">
-                                <div class="stat-value" style="font-size: 24px; color: var(--warning);">${report.outpasses.pending || 0}</div>
+                                <div class="stat-value" style="font-size: 24px; color: var(--warning);">${outpasses.pending || 0}</div>
                                 <div class="stat-label">Waiting for Review</div>
                             </div>
                             <div class="modern-card" style="padding: 16px; border-left: 4px solid var(--success);">
-                                <div class="stat-value" style="font-size: 24px; color: var(--success);">${report.outpasses.approved || 0}</div>
+                                <div class="stat-value" style="font-size: 24px; color: var(--success);">${outpasses.approved || 0}</div>
                                 <div class="stat-label">Approved & Issued</div>
                             </div>
                             <div class="modern-card" style="padding: 16px; border-left: 4px solid var(--danger);">
-                                <div class="stat-value" style="font-size: 24px; color: var(--danger);">${report.outpasses.rejected || 0}</div>
+                                <div class="stat-value" style="font-size: 24px; color: var(--danger);">${outpasses.rejected || 0}</div>
                                 <div class="stat-label">Total Rejections</div>
                             </div>
                         </div>
@@ -715,10 +773,27 @@ async function loadSystemReports() {
 
             document.getElementById('moduleContent').innerHTML = html;
         } else {
-            document.getElementById('moduleContent').innerHTML = `<div class="card"><p>${data.message || 'Error loading reports'}</p></div>`;
+            document.getElementById('moduleContent').innerHTML = `
+                <div class="card" style="padding: 2.5rem; text-align: center;">
+                    <i class="ph ph-warning-circle" style="font-size: 3rem; color: var(--danger); margin-bottom: 1rem;"></i>
+                    <h3 style="margin-bottom: 0.5rem;">Failed to load reports</h3>
+                    <p style="color: var(--text-muted); margin-bottom: 1.5rem;">${data.message || 'Error loading reports'}</p>
+                    <button onclick="loadSystemReports()" class="btn-modern btn-modern-primary" style="margin: 0 auto; width: auto;">
+                        <i class="ph ph-arrow-clockwise"></i> Try Again
+                    </button>
+                </div>`;
         }
     } catch (error) {
-        console.error('Error:', error);
+        console.error('Error loading reports:', error);
+        document.getElementById('moduleContent').innerHTML = `
+            <div class="card" style="padding: 2.5rem; text-align: center;">
+                <i class="ph ph-warning-circle" style="font-size: 3rem; color: var(--danger); margin-bottom: 1rem;"></i>
+                <h3 style="margin-bottom: 0.5rem;">Failed to load reports</h3>
+                <p style="color: var(--text-muted); margin-bottom: 1.5rem;">${error.message || 'Network error occurred while fetching reports.'}</p>
+                <button onclick="loadSystemReports()" class="btn-modern btn-modern-primary" style="margin: 0 auto; width: auto;">
+                    <i class="ph ph-arrow-clockwise"></i> Try Again
+                </button>
+            </div>`;
     }
 }
 

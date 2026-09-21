@@ -810,3 +810,35 @@ h3,
         width: 100%;
     }
 }
+
+/* Sleek Top Progress Bar & Smooth Transitions */
+.module-progress-bar {
+    position: sticky;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: transparent;
+    z-index: 999;
+    overflow: hidden;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    margin-bottom: -3px;
+}
+
+.module-progress-bar.active {
+    opacity: 1;
+    background: linear-gradient(90deg, var(--primary) 0%, #38bdf8 50%, var(--primary) 100%);
+    background-size: 200% 100%;
+    animation: progressBarMove 1.2s linear infinite;
+}
+
+@keyframes progressBarMove {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+
+#moduleContent {
+    transition: opacity 0.15s ease-out;
+}
