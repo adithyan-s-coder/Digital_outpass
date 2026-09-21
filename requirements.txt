@@ -21,3 +21,4 @@ typing_extensions
 Werkzeug
 twilio
 fpdf2
+certifi

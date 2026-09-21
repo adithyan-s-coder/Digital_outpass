@@ -79,7 +79,7 @@ INSERT INTO outpass_logs (outpass_id, action_by, action_type, remarks) VALUES
 (1, 2, 'hod_approved', 'Final approval given');
 
 -- Create a view for easy outpass tracking
-CREATE VIEW vw_outpass_details AS
+CREATE OR REPLACE VIEW vw_outpass_details AS
 SELECT 
     o.outpass_id,
     o.out_date,

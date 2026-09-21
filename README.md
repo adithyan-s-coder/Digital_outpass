@@ -4,6 +4,8 @@
 
 🔗 Live Demo: https://digital-outpass.onrender.com
 
+> 💡 **Free Cloud Database Setup**: If deploying to Render, follow the [Free Database Setup Guide](docs/FREE_DATABASE_SETUP.md) to connect a free-forever **TiDB Cloud Serverless** or **Aiven** database without requiring a credit card.
+
 ## Project Overview
 A complete college outpass management system with role-based access for Students, Staff, HOD, Security, and Admin with QR code verification.
 

@@ -25,41 +25,141 @@ app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=2)
 
 # ================= DATABASE CONNECTION =================
 
-def get_db_connection():
-    try:
-        # Get connection parameters with safe defaults
-        db_host = os.environ.get("DB_HOST", "localhost")
-        db_user = os.environ.get("DB_USER", "root")
-        db_password = os.environ.get("DB_PASSWORD", "")
-        db_name = os.environ.get("DB_NAME", "outpass_db")
-        db_port = os.environ.get("DB_PORT", "3306")
-        
-        # Ensure port is an integer
-        try:
-            db_port = int(db_port)
-        except (ValueError, TypeError):
-            db_port = 3306
+try:
+    import certifi
+    DEFAULT_CA_PATH = certifi.where()
+except ImportError:
+    DEFAULT_CA_PATH = None
 
-        conn = mysql.connector.connect(
-            host=db_host,
-            user=db_user,
-            password=db_password,
-            database=db_name,
-            port=db_port,
-            ssl_disabled=False,
-            autocommit=True,
-            connection_timeout=10
-        )
-        
-        # Set session timezone to IST (+05:30)
+def get_db_connection_params():
+    """Extract database connection parameters from URL or discrete environment variables."""
+    import urllib.parse
+
+    db_url = os.environ.get("DATABASE_URL") or os.environ.get("MYSQL_URL")
+
+    db_host = os.environ.get("DB_HOST", "localhost")
+    db_user = os.environ.get("DB_USER", "root")
+    db_password = os.environ.get("DB_PASSWORD", "")
+    db_name = os.environ.get("DB_NAME", "outpass_db")
+    db_port = os.environ.get("DB_PORT", "3306")
+
+    # If DATABASE_URL / MYSQL_URL is provided, extract parameters
+    if db_url:
+        parsed = urllib.parse.urlparse(db_url)
+        if parsed.hostname:
+            db_host = parsed.hostname
+        if parsed.username:
+            db_user = urllib.parse.unquote(parsed.username)
+        if parsed.password:
+            db_password = urllib.parse.unquote(parsed.password)
+        if parsed.port:
+            db_port = parsed.port
+        if parsed.path and parsed.path.strip('/'):
+            # Strip query string or extra segments if any
+            clean_path = parsed.path.strip('/').split('/')[0]
+            if clean_path:
+                db_name = clean_path
+
+    try:
+        db_port = int(db_port)
+    except (ValueError, TypeError):
+        db_port = 3306
+
+    return {
+        'host': db_host,
+        'user': db_user,
+        'password': db_password,
+        'database': db_name,
+        'port': db_port
+    }
+
+
+def get_db_connection():
+    """Establishes and returns a connection to MySQL / TiDB / Cloud Database."""
+    params = get_db_connection_params()
+    is_local = params['host'] in ('localhost', '127.0.0.1')
+
+    # SSL Configuration
+    # For cloud databases like TiDB Cloud / Aiven, SSL is required
+    ssl_disabled_env = os.environ.get("DB_SSL_DISABLED", "").strip().lower()
+    if ssl_disabled_env in ("true", "1", "yes"):
+        ssl_disabled = True
+    elif ssl_disabled_env in ("false", "0", "no"):
+        ssl_disabled = False
+    else:
+        # Default: disable SSL on localhost, enable for remote cloud databases
+        ssl_disabled = is_local
+
+    ca_path = os.environ.get("DB_SSL_CA") or DEFAULT_CA_PATH
+
+    conn_configs = []
+    if not ssl_disabled:
+        # 1. Try with verified CA bundle (standard for TiDB Cloud / Aiven)
+        cfg_ssl_ca = {
+            'host': params['host'],
+            'user': params['user'],
+            'password': params['password'],
+            'database': params['database'],
+            'port': params['port'],
+            'autocommit': True,
+            'connection_timeout': 15,
+            'ssl_disabled': False
+        }
+        if ca_path and os.path.exists(ca_path):
+            cfg_ssl_ca['ssl_ca'] = ca_path
+            cfg_ssl_ca['ssl_verify_cert'] = True
+        conn_configs.append(cfg_ssl_ca)
+
+        # 2. Fallback without strict cert verification (in case cloud provider uses custom CA)
+        cfg_ssl_fallback = {
+            'host': params['host'],
+            'user': params['user'],
+            'password': params['password'],
+            'database': params['database'],
+            'port': params['port'],
+            'autocommit': True,
+            'connection_timeout': 15,
+            'ssl_disabled': False,
+            'ssl_verify_cert': False
+        }
+        conn_configs.append(cfg_ssl_fallback)
+
+    # 3. Fallback without SSL (for localhost or non-SSL databases)
+    conn_configs.append({
+        'host': params['host'],
+        'user': params['user'],
+        'password': params['password'],
+        'database': params['database'],
+        'port': params['port'],
+        'autocommit': True,
+        'connection_timeout': 15,
+        'ssl_disabled': True
+    })
+
+    conn = None
+    last_err = None
+    for config in conn_configs:
+        try:
+            conn = mysql.connector.connect(**config)
+            if conn.is_connected():
+                break
+        except Exception as err:
+            last_err = err
+            conn = None
+
+    if not conn or not conn.is_connected():
+        print(f"[ERROR] Database connection failed to {params['user']}@{params['host']}:{params['port']}/{params['database']}: {last_err}")
+        return None
+
+    # Set session timezone to IST (+05:30) safely
+    try:
         cursor = conn.cursor()
         cursor.execute("SET time_zone = '+05:30'")
         cursor.close()
-        
-        return conn
-    except Exception as e:
-        print(f"[ERROR] Database connection failed: {e}")
-        return None
+    except Exception as tz_err:
+        print(f"[INFO] Timezone set skipped: {tz_err}")
+
+    return conn
 
 
 # ================= INIT DB FUNCTION =================
