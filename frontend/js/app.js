@@ -158,6 +158,9 @@ document.addEventListener('DOMContentLoaded', function () {
                     if (profileImgInput) profileImgInput.required = false;
                 }
             });
+
+            // Trigger change event to initialize visibility and requirements for default role (student)
+            regRole.dispatchEvent(new Event('change'));
         }
 
         // Name capitalization listener
@@ -739,6 +742,10 @@ function showRegisterPage() {
     hideError(document.getElementById('registerError'));
     hideSuccess(document.getElementById('registerSuccess'));
     removeCapturedPhoto();
+    const regRole = document.getElementById('regRole');
+    if (regRole) {
+        regRole.dispatchEvent(new Event('change'));
+    }
 }
 
 function showError(element, message) {

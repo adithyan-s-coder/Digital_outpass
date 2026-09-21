@@ -182,24 +182,23 @@
                                 required
                                 style="border-radius: 10px; padding: 12px; background: #f8fafc; border: 1px solid #e2e8f0;">
                         </div>
-                        <div class="form-group" id="deptYearContainer" style="grid-column: span 1; display: flex; gap: 10px; align-items: flex-end;">
-                            <div style="flex: 2;">
-                                <label style="font-weight: 700; text-transform: uppercase; font-size: 11px;">Department</label>
-                                <select id="regDept" name="dept_id" required
-                                    style="border-radius: 10px; padding: 12px; background: #f8fafc; border: 1px solid #e2e8f0; width: 100%;">
-                                    <option value="">Loading...</option>
-                                </select>
-                            </div>
-                            <div id="yearGroup" style="flex: 1; display: none;">
-                                <label style="font-weight: 700; text-transform: uppercase; font-size: 11px;">Year</label>
-                                <select name="academic_year" id="regYear"
-                                    style="border-radius: 10px; padding: 12px; background: #f8fafc; border: 1px solid #e2e8f0; width: 100%;">
-                                    <option value="">Year</option>
-                                    <option value="1">1st</option>
-                                    <option value="2">2nd</option>
-                                    <option value="3">3rd</option>
-                                </select>
-                            </div>
+                        <div class="form-group" id="deptGroup">
+                            <label style="font-weight: 700; text-transform: uppercase; font-size: 11px;">Department</label>
+                            <select id="regDept" name="dept_id" required
+                                style="border-radius: 10px; padding: 12px; background: #f8fafc; border: 1px solid #e2e8f0; width: 100%;">
+                                <option value="">Loading...</option>
+                            </select>
+                        </div>
+                        <div class="form-group" id="yearGroup">
+                            <label style="font-weight: 700; text-transform: uppercase; font-size: 11px;">Academic Year</label>
+                            <select name="academic_year" id="regYear" required
+                                style="border-radius: 10px; padding: 12px; background: #f8fafc; border: 1px solid #e2e8f0; width: 100%;">
+                                <option value="">Select Academic Year</option>
+                                <option value="1">1st Year</option>
+                                <option value="2">2nd Year</option>
+                                <option value="3">3rd Year</option>
+                                <option value="4">4th Year</option>
+                            </select>
                         </div>
                         <div class="form-group">
                             <label

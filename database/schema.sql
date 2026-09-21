@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS users (
     role ENUM('student', 'staff', 'hod', 'security', 'admin') NOT NULL,
     dept_id INT,
     registration_no VARCHAR(50) UNIQUE,
+    academic_year INT,
     phone VARCHAR(15),
     parent_name VARCHAR(100),
     parent_mobile VARCHAR(15),
