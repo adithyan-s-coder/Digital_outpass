@@ -23,13 +23,20 @@ CORS(app)
 app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret-123')
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=2)
 
-# ================= DATABASE CONNECTION =================
+# ================= DATABASE CONNECTION & POOLING =================
+
+import threading
+from mysql.connector import pooling
 
 try:
     import certifi
     DEFAULT_CA_PATH = certifi.where()
 except ImportError:
     DEFAULT_CA_PATH = None
+
+_db_pool = None
+_pool_lock = threading.Lock()
+_working_config = None
 
 def get_db_connection_params():
     """Extract database connection parameters from URL or discrete environment variables."""
@@ -55,7 +62,6 @@ def get_db_connection_params():
         if parsed.port:
             db_port = parsed.port
         if parsed.path and parsed.path.strip('/'):
-            # Strip query string or extra segments if any
             clean_path = parsed.path.strip('/').split('/')[0]
             if clean_path:
                 db_name = clean_path
@@ -74,27 +80,27 @@ def get_db_connection_params():
     }
 
 
-def get_db_connection():
-    """Establishes and returns a connection to MySQL / TiDB / Cloud Database."""
-    params = get_db_connection_params()
+def find_working_config(params):
+    """Probes candidate connection configurations once and caches the working one."""
+    global _working_config
+    if _working_config is not None:
+        return _working_config
+
     is_local = params['host'] in ('localhost', '127.0.0.1')
 
-    # SSL Configuration
-    # For cloud databases like TiDB Cloud / Aiven, SSL is required
     ssl_disabled_env = os.environ.get("DB_SSL_DISABLED", "").strip().lower()
     if ssl_disabled_env in ("true", "1", "yes"):
         ssl_disabled = True
     elif ssl_disabled_env in ("false", "0", "no"):
         ssl_disabled = False
     else:
-        # Default: disable SSL on localhost, enable for remote cloud databases
         ssl_disabled = is_local
 
     ca_path = os.environ.get("DB_SSL_CA") or DEFAULT_CA_PATH
 
     conn_configs = []
     if not ssl_disabled:
-        # 1. Try with verified CA bundle (standard for TiDB Cloud / Aiven)
+        # 1. Standard SSL with trusted CA bundle (TiDB Cloud / Aiven)
         cfg_ssl_ca = {
             'host': params['host'],
             'user': params['user'],
@@ -102,7 +108,7 @@ def get_db_connection():
             'database': params['database'],
             'port': params['port'],
             'autocommit': True,
-            'connection_timeout': 15,
+            'connection_timeout': 5,
             'ssl_disabled': False
         }
         if ca_path and os.path.exists(ca_path):
@@ -110,19 +116,18 @@ def get_db_connection():
             cfg_ssl_ca['ssl_verify_cert'] = True
         conn_configs.append(cfg_ssl_ca)
 
-        # 2. Fallback without strict cert verification (in case cloud provider uses custom CA)
-        cfg_ssl_fallback = {
+        # 2. SSL fallback without strict cert verification (in case cloud provider cert chain issues)
+        conn_configs.append({
             'host': params['host'],
             'user': params['user'],
             'password': params['password'],
             'database': params['database'],
             'port': params['port'],
             'autocommit': True,
-            'connection_timeout': 15,
+            'connection_timeout': 5,
             'ssl_disabled': False,
             'ssl_verify_cert': False
-        }
-        conn_configs.append(cfg_ssl_fallback)
+        })
 
     # 3. Fallback without SSL (for localhost or non-SSL databases)
     conn_configs.append({
@@ -132,34 +137,89 @@ def get_db_connection():
         'database': params['database'],
         'port': params['port'],
         'autocommit': True,
-        'connection_timeout': 15,
+        'connection_timeout': 5,
         'ssl_disabled': True
     })
 
-    conn = None
     last_err = None
     for config in conn_configs:
         try:
-            conn = mysql.connector.connect(**config)
-            if conn.is_connected():
-                break
+            test_conn = mysql.connector.connect(**config)
+            if test_conn.is_connected():
+                try:
+                    c = test_conn.cursor()
+                    c.execute("SET time_zone = '+05:30'")
+                    c.close()
+                except Exception:
+                    pass
+                test_conn.close()
+                _working_config = dict(config)
+                print(f"[OK] Database connection verified (ssl_disabled={config.get('ssl_disabled', False)})")
+                return _working_config
         except Exception as err:
             last_err = err
-            conn = None
 
-    if not conn or not conn.is_connected():
-        print(f"[ERROR] Database connection failed to {params['user']}@{params['host']}:{params['port']}/{params['database']}: {last_err}")
-        return None
+    print(f"[ERROR] Database probe failed for {params['user']}@{params['host']}:{params['port']}/{params['database']}: {last_err}")
+    return None
 
-    # Set session timezone to IST (+05:30) safely
-    try:
-        cursor = conn.cursor()
-        cursor.execute("SET time_zone = '+05:30'")
-        cursor.close()
-    except Exception as tz_err:
-        print(f"[INFO] Timezone set skipped: {tz_err}")
 
-    return conn
+def get_db_pool():
+    """Initializes or retrieves the persistent connection pool."""
+    global _db_pool, _working_config
+    if _db_pool is not None:
+        return _db_pool
+
+    with _pool_lock:
+        if _db_pool is not None:
+            return _db_pool
+
+        params = get_db_connection_params()
+        working_cfg = find_working_config(params)
+        if not working_cfg:
+            return None
+
+        try:
+            pool_config = dict(working_cfg)
+            pool_config['pool_name'] = "outpass_pool"
+            pool_config['pool_size'] = 5
+            pool_config['pool_reset_session'] = True
+            _db_pool = pooling.MySQLConnectionPool(**pool_config)
+            print("[OK] Initialized persistent MySQL connection pool (size=5)")
+            return _db_pool
+        except Exception as e:
+            print(f"[WARN] Connection pool initialization failed, will use direct connections: {e}")
+            return None
+
+
+def get_db_connection():
+    """Returns an active database connection from the persistent pool (or direct fallback)."""
+    pool = get_db_pool()
+    if pool:
+        try:
+            conn = pool.get_connection()
+            if conn and conn.is_connected():
+                return conn
+            elif conn:
+                conn.ping(reconnect=True, attempts=2, delay=1)
+                return conn
+        except Exception as pool_err:
+            print(f"[WARN] Pool checkout warning: {pool_err}")
+
+    # Fallback to direct connection using cached working config
+    cfg = _working_config
+    if not cfg:
+        params = get_db_connection_params()
+        cfg = find_working_config(params)
+
+    if cfg:
+        try:
+            conn = mysql.connector.connect(**cfg)
+            if conn.is_connected():
+                return conn
+        except Exception as dir_err:
+            print(f"[ERROR] Direct database connection failed: {dir_err}")
+
+    return None
 
 
 # ================= INIT DB FUNCTION =================

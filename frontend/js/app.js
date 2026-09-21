@@ -639,8 +639,16 @@ function loadModule(module) {
         }
     });
 
-    // Show loading
-    content.innerHTML = '<div class="loading">Establishing secure connection...</div>';
+    // For purely client-side modules, don't show any loading screen to render instantly
+    const clientSideModules = ['apply-outpass', 'scan-qr'];
+    if (!clientSideModules.includes(module)) {
+        content.innerHTML = `
+            <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 260px; gap: 12px; animation: fadeIn 0.2s ease-out;">
+                <i class="ph ph-circle-notch ph-spin" style="font-size: 32px; color: var(--primary);"></i>
+                <span style="font-size: 14px; font-weight: 500; color: var(--text-muted);">Loading...</span>
+            </div>
+        `;
+    }
 
     // Call appropriate function based on module
     switch (module) {
