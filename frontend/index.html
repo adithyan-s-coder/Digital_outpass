@@ -454,6 +454,180 @@
         </div>
     </div>
 
+    <!-- AI-Powered Outpass Report Modal -->
+    <div id="aiReportModal" class="modal">
+        <div class="modal-content glass-panel" style="max-width: 900px; padding: 28px; max-height: 90vh; overflow-y: auto;">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <div style="width: 44px; height: 44px; border-radius: 12px; background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); display: flex; align-items: center; justify-content: center; color: white; font-size: 24px; box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);">
+                        <i class="ph ph-sparkle"></i>
+                    </div>
+                    <div>
+                        <h2 style="font-size: 22px; font-weight: 800; color: var(--text-main); margin: 0;">AI Outpass Report Generator</h2>
+                        <p style="color: var(--text-muted); font-size: 13px; margin: 2px 0 0 0;">Statistical Analytics & Administrative Intelligence</p>
+                    </div>
+                </div>
+                <span class="close" onclick="closeAIReportModal()" style="font-size: 28px; cursor: pointer; color: var(--text-muted);">&times;</span>
+            </div>
+
+            <!-- Report Period Filters -->
+            <div class="ai-filter-bar no-print" style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 14px; padding: 16px; margin-bottom: 20px;">
+                <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; color: var(--text-muted); margin-bottom: 10px; letter-spacing: 0.05em;">
+                    Select Reporting Window
+                </div>
+                <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px;">
+                    <button type="button" class="ai-period-btn active" data-period="today" onclick="selectReportPeriod('today')">Today</button>
+                    <button type="button" class="ai-period-btn" data-period="yesterday" onclick="selectReportPeriod('yesterday')">Yesterday</button>
+                    <button type="button" class="ai-period-btn" data-period="this_week" onclick="selectReportPeriod('this_week')">This Week</button>
+                    <button type="button" class="ai-period-btn" data-period="this_month" onclick="selectReportPeriod('this_month')">This Month</button>
+                    <button type="button" class="ai-period-btn" data-period="custom" onclick="selectReportPeriod('custom')">Custom Range</button>
+                </div>
+
+                <!-- Custom Range Inputs (Hidden by default) -->
+                <div id="aiCustomDateRange" style="display: none; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 10px; padding-top: 10px; border-top: 1px dashed #e2e8f0;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <label style="font-size: 12px; font-weight: 600; color: var(--text-muted);">From:</label>
+                        <input type="date" id="aiReportStartDate" class="form-control" style="padding: 8px 12px; border-radius: 8px; border: 1px solid #cbd5e1; font-size: 13px;">
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <label style="font-size: 12px; font-weight: 600; color: var(--text-muted);">To:</label>
+                        <input type="date" id="aiReportEndDate" class="form-control" style="padding: 8px 12px; border-radius: 8px; border: 1px solid #cbd5e1; font-size: 13px;">
+                    </div>
+                </div>
+
+                <div style="display: flex; justify-content: flex-end; margin-top: 12px;">
+                    <button type="button" id="btnGenerateAIReport" onclick="generateAIReport()" class="btn-modern" style="background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); color: white; padding: 10px 20px; font-weight: 600; width: auto; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);">
+                        <i class="ph ph-lightning"></i> Generate Analysis
+                    </button>
+                </div>
+            </div>
+
+            <!-- Loader -->
+            <div id="aiReportLoader" style="display: none; text-align: center; padding: 40px 20px;">
+                <div class="loading" style="font-size: 15px; font-weight: 600; color: #4f46e5;">
+                    <i class="ph ph-circle-notch ph-spin" style="font-size: 32px; display: block; margin: 0 auto 12px auto;"></i>
+                    Analyzing database transactions & generating AI synthesis...
+                </div>
+            </div>
+
+            <!-- Results Display Area -->
+            <div id="aiReportResultArea" style="display: none;">
+                <!-- Printable Report Header -->
+                <div class="ai-report-meta" style="display: flex; justify-content: space-between; align-items: center; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px 18px; margin-bottom: 20px;">
+                    <div>
+                        <div style="font-size: 11px; text-transform: uppercase; font-weight: 700; color: var(--text-muted); letter-spacing: 0.05em;" id="aiReportScope">Advisor Scope</div>
+                        <div style="font-size: 16px; font-weight: 700; color: var(--text-main);" id="aiReportPeriodText">Period: Today</div>
+                    </div>
+                    <div style="text-align: right;">
+                        <span class="status-badge" id="aiReportSourceBadge" style="background: #eef2ff; color: #4f46e5; border: 1px solid #c7d2fe; font-size: 11px; font-weight: 700;">AI Synthesized</span>
+                        <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;" id="aiReportTimestamp">Generated on: --</div>
+                    </div>
+                </div>
+
+                <!-- Verified Stats Metric Cards Grid -->
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; margin-bottom: 24px;">
+                    <div class="stat-card" style="padding: 14px; text-align: center; border-radius: 12px; border: 1px solid #e2e8f0; background: white;">
+                        <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--text-muted);">Total Requests</div>
+                        <div style="font-size: 24px; font-weight: 800; color: var(--text-main); margin-top: 4px;" id="statTotalRequests">0</div>
+                    </div>
+                    <div class="stat-card" style="padding: 14px; text-align: center; border-radius: 12px; border: 1px solid #dcfce7; background: #f0fdf4;">
+                        <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: #15803d;">Approved</div>
+                        <div style="font-size: 24px; font-weight: 800; color: #16a34a; margin-top: 4px;" id="statApproved">0</div>
+                    </div>
+                    <div class="stat-card" style="padding: 14px; text-align: center; border-radius: 12px; border: 1px solid #fee2e2; background: #fef2f2;">
+                        <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: #b91c1c;">Rejected</div>
+                        <div style="font-size: 24px; font-weight: 800; color: #dc2626; margin-top: 4px;" id="statRejected">0</div>
+                    </div>
+                    <div class="stat-card" style="padding: 14px; text-align: center; border-radius: 12px; border: 1px solid #fef3c7; background: #fffbeb;">
+                        <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: #b45309;">Pending</div>
+                        <div style="font-size: 24px; font-weight: 800; color: #d97706; margin-top: 4px;" id="statPending">0</div>
+                    </div>
+                    <div class="stat-card" style="padding: 14px; text-align: center; border-radius: 12px; border: 1px solid #e0e7ff; background: #eef2ff;">
+                        <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: #4338ca;">Currently Out</div>
+                        <div style="font-size: 24px; font-weight: 800; color: #4f46e5; margin-top: 4px;" id="statCurrentlyOut">0</div>
+                    </div>
+                    <div class="stat-card" style="padding: 14px; text-align: center; border-radius: 12px; border: 1px solid #ffedd5; background: #fff7ed;">
+                        <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: #c2410c;">Late Returns</div>
+                        <div style="font-size: 24px; font-weight: 800; color: #ea580c; margin-top: 4px;" id="statLateReturns">0</div>
+                    </div>
+                </div>
+
+                <!-- Secondary Operational Metrics -->
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 24px;">
+                    <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px; display: flex; align-items: center; gap: 12px;">
+                        <i class="ph ph-clock" style="font-size: 28px; color: #4f46e5;"></i>
+                        <div>
+                            <div style="font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase;">Avg Approval Time</div>
+                            <div style="font-size: 16px; font-weight: 700; color: var(--text-main);" id="statAvgApproval">--</div>
+                        </div>
+                    </div>
+                    <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px; display: flex; align-items: center; gap: 12px;">
+                        <i class="ph ph-trend-up" style="font-size: 28px; color: #059669;"></i>
+                        <div>
+                            <div style="font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase;">Peak Departure Window</div>
+                            <div style="font-size: 16px; font-weight: 700; color: var(--text-main);" id="statPeakHours">--</div>
+                        </div>
+                    </div>
+                    <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px; display: flex; align-items: center; gap: 12px;">
+                        <i class="ph ph-hourglass-high" style="font-size: 28px; color: #ea580c;"></i>
+                        <div>
+                            <div style="font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase;">Avg Return Delay</div>
+                            <div style="font-size: 16px; font-weight: 700; color: var(--text-main);" id="statAvgDelay">--</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- AI Executive Summary Card -->
+                <div class="ai-summary-box" style="background: linear-gradient(180deg, #faf5ff 0%, #ffffff 100%); border: 1px solid #e9d5ff; border-radius: 14px; padding: 20px; margin-bottom: 20px; box-shadow: 0 4px 14px rgba(124, 58, 237, 0.06);">
+                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px;">
+                        <i class="ph ph-brain" style="font-size: 20px; color: #7c3aed;"></i>
+                        <h4 style="margin: 0; font-size: 15px; font-weight: 700; color: #581c87; text-transform: uppercase; letter-spacing: 0.05em;">AI Executive Summary</h4>
+                    </div>
+                    <p id="aiSummaryContent" style="font-size: 14px; line-height: 1.6; color: #374151; margin: 0;">
+                        Loading analytical overview...
+                    </p>
+                </div>
+
+                <!-- Key Operational Insights -->
+                <div style="margin-bottom: 24px;">
+                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+                        <i class="ph ph-lightbulb-filament" style="font-size: 20px; color: #d97706;"></i>
+                        <h4 style="margin: 0; font-size: 15px; font-weight: 700; color: var(--text-main);">Strategic Findings & Observations</h4>
+                    </div>
+                    <div id="aiKeyInsightsList" style="display: flex; flex-direction: column; gap: 8px;">
+                        <!-- Injected dynamically -->
+                    </div>
+                </div>
+
+                <!-- Common Reasons & Breakdown Details -->
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-bottom: 24px;">
+                    <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px;">
+                        <h5 style="margin: 0 0 10px 0; font-size: 13px; font-weight: 700; text-transform: uppercase; color: var(--text-muted);">Frequent Outpass Reasons</h5>
+                        <div id="aiTopReasonsList" style="font-size: 13px; color: var(--text-main);">
+                            <!-- Injected dynamically -->
+                        </div>
+                    </div>
+                    <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px;">
+                        <h5 style="margin: 0 0 10px 0; font-size: 13px; font-weight: 700; text-transform: uppercase; color: var(--text-muted);">Distribution by Academic Year</h5>
+                        <div id="aiYearBreakdownList" style="font-size: 13px; color: var(--text-main);">
+                            <!-- Injected dynamically -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Actions / Print Footer -->
+                <div class="no-print" style="display: flex; justify-content: flex-end; gap: 12px; border-top: 1px solid #e2e8f0; padding-top: 16px;">
+                    <button type="button" onclick="window.print()" class="btn-modern" style="width: auto; background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe;">
+                        <i class="ph ph-printer"></i> Print / Save as PDF
+                    </button>
+                    <button type="button" onclick="closeAIReportModal()" class="btn-modern" style="width: auto; background: #f1f5f9; color: var(--text-main); border: 1px solid #cbd5e1;">
+                        Close
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Background Scripts -->
     <script src="js/app.js"></script>
     <script src="js/student.js"></script>

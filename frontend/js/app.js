@@ -241,8 +241,14 @@ document.addEventListener('DOMContentLoaded', function () {
         const closeBtn = qrModal.querySelector('.close');
         if (closeBtn) closeBtn.onclick = () => qrModal.classList.remove('show');
     }
+    const aiModal = document.getElementById('aiReportModal');
+    if (aiModal) {
+        const aiCloseBtn = aiModal.querySelector('.close');
+        if (aiCloseBtn) aiCloseBtn.onclick = () => aiModal.classList.remove('show');
+    }
     window.onclick = (e) => {
         if (qrModal && e.target == qrModal) qrModal.classList.remove('show');
+        if (aiModal && e.target == aiModal) aiModal.classList.remove('show');
     };
 
     // Close mobile menu when nav link clicked
@@ -982,3 +988,216 @@ function printQR() {
 // Global exposure for onclick handlers
 window.printQR = printQR;
 window.printHistory = () => { window.print(); };
+
+// ==========================================
+// AI-Powered Outpass Report Generation
+// ==========================================
+let currentReportPeriod = 'today';
+
+function openAIReportModal() {
+    const modal = document.getElementById('aiReportModal');
+    if (!modal) return;
+
+    // Set default dates in inputs
+    const todayStr = new Date().toISOString().split('T')[0];
+    const startDateInput = document.getElementById('aiReportStartDate');
+    const endDateInput = document.getElementById('aiReportEndDate');
+    if (startDateInput && !startDateInput.value) startDateInput.value = todayStr;
+    if (endDateInput && !endDateInput.value) endDateInput.value = todayStr;
+
+    // Default period to today
+    selectReportPeriod('today');
+
+    // Show modal
+    modal.classList.add('show');
+
+    // Automatically generate today's report on open if result area is empty
+    const resultArea = document.getElementById('aiReportResultArea');
+    if (resultArea && resultArea.style.display === 'none') {
+        generateAIReport();
+    }
+}
+
+function closeAIReportModal() {
+    const modal = document.getElementById('aiReportModal');
+    if (modal) modal.classList.remove('show');
+}
+
+function selectReportPeriod(period) {
+    currentReportPeriod = period;
+
+    // Update active class on buttons
+    document.querySelectorAll('.ai-period-btn').forEach(btn => {
+        if (btn.getAttribute('data-period') === period) {
+            btn.classList.add('active');
+        } else {
+            btn.classList.remove('active');
+        }
+    });
+
+    // Show/hide custom range inputs
+    const customRangeDiv = document.getElementById('aiCustomDateRange');
+    if (customRangeDiv) {
+        customRangeDiv.style.display = (period === 'custom') ? 'flex' : 'none';
+    }
+}
+
+async function generateAIReport() {
+    const loader = document.getElementById('aiReportLoader');
+    const resultArea = document.getElementById('aiReportResultArea');
+    const generateBtn = document.getElementById('btnGenerateAIReport');
+
+    if (loader) loader.style.display = 'block';
+    if (resultArea) resultArea.style.display = 'none';
+    if (generateBtn) generateBtn.disabled = true;
+
+    try {
+        const user = currentUser || {};
+        const role = user.role || 'staff';
+        const endpoint = (role === 'hod') ? `${app.API_BASE}/hod/ai-report` : `${app.API_BASE}/staff/ai-report`;
+
+        const payload = {
+            period: currentReportPeriod
+        };
+
+        if (currentReportPeriod === 'custom') {
+            payload.start_date = document.getElementById('aiReportStartDate')?.value;
+            payload.end_date = document.getElementById('aiReportEndDate')?.value;
+        }
+
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+            throw new Error(data.message || 'Failed to generate report');
+        }
+
+        // Render stats
+        const stats = data.stats || {};
+        document.getElementById('statTotalRequests').innerText = stats.total_requests || 0;
+        document.getElementById('statApproved').innerText = stats.approved || 0;
+        document.getElementById('statRejected').innerText = stats.rejected || 0;
+        document.getElementById('statPending').innerText = stats.pending || 0;
+        document.getElementById('statCurrentlyOut').innerText = stats.currently_outside || 0;
+        document.getElementById('statLateReturns').innerText = stats.late_returns || 0;
+
+        document.getElementById('statAvgApproval').innerText = stats.avg_approval_time_minutes ? `${stats.avg_approval_time_minutes} mins` : 'N/A';
+        document.getElementById('statPeakHours').innerText = stats.peak_departure_hours || 'N/A';
+        document.getElementById('statAvgDelay').innerText = stats.avg_return_delay_minutes ? `${stats.avg_return_delay_minutes} mins` : 'None (0 mins)';
+
+        // Render meta
+        document.getElementById('aiReportScope').innerText = data.scope || (role === 'hod' ? 'Department Scope' : 'Advisor Scope');
+        document.getElementById('aiReportPeriodText').innerText = `Period: ${data.period_label || currentReportPeriod}`;
+        document.getElementById('aiReportTimestamp').innerText = `Generated on: ${data.generated_at || new Date().toLocaleString()}`;
+
+        const report = data.report || {};
+        const sourceBadge = document.getElementById('aiReportSourceBadge');
+        if (sourceBadge) {
+            if (report.source === 'ai') {
+                sourceBadge.innerText = 'AI Synthesized';
+                sourceBadge.style.background = '#eef2ff';
+                sourceBadge.style.color = '#4f46e5';
+                sourceBadge.style.borderColor = '#c7d2fe';
+            } else {
+                sourceBadge.innerText = 'Verified Statistical Insights';
+                sourceBadge.style.background = '#f1f5f9';
+                sourceBadge.style.color = '#475569';
+                sourceBadge.style.borderColor = '#cbd5e1';
+            }
+        }
+
+        // Render AI Executive Summary
+        const summaryElem = document.getElementById('aiSummaryContent');
+        if (summaryElem) {
+            summaryElem.innerText = report.ai_summary || 'No summary generated.';
+        }
+
+        // Render Strategic Key Insights
+        const insightsList = document.getElementById('aiKeyInsightsList');
+        if (insightsList) {
+            const insights = report.key_insights || [];
+            if (insights.length === 0) {
+                insightsList.innerHTML = '<div style="color: var(--text-muted); font-size: 13px;">No notable deviations or anomalies recorded for this period.</div>';
+            } else {
+                insightsList.innerHTML = insights.map(item => `
+                    <div class="ai-insight-item">
+                        <i class="ph ph-check-circle" style="color: #6366f1; font-size: 18px; flex-shrink: 0; margin-top: 1px;"></i>
+                        <div>${item}</div>
+                    </div>
+                `).join('');
+            }
+        }
+
+        // Render Top Reasons
+        const reasonsList = document.getElementById('aiTopReasonsList');
+        if (reasonsList) {
+            const topReasons = stats.top_reasons || [];
+            if (topReasons.length === 0) {
+                reasonsList.innerHTML = '<div style="color: var(--text-muted);">No records found.</div>';
+            } else {
+                reasonsList.innerHTML = topReasons.map(r => `
+                    <div class="ai-reason-pill">
+                        <span>${r.reason}</span>
+                        <strong style="color: var(--primary);">${r.count}</strong>
+                    </div>
+                `).join('');
+            }
+        }
+
+        // Render Year Breakdown
+        const yearList = document.getElementById('aiYearBreakdownList');
+        if (yearList) {
+            const yearBreakdown = stats.year_breakdown || {};
+            const keys = Object.keys(yearBreakdown);
+            if (keys.length === 0) {
+                yearList.innerHTML = '<div style="color: var(--text-muted);">No academic year data available.</div>';
+            } else {
+                yearList.innerHTML = keys.map(k => `
+                    <div class="ai-reason-pill">
+                        <span>${k}</span>
+                        <strong style="color: #6366f1;">${yearBreakdown[k]} requests</strong>
+                    </div>
+                `).join('');
+            }
+        }
+
+        if (resultArea) resultArea.style.display = 'block';
+
+    } catch (err) {
+        console.error('AI Report error:', err);
+        if (resultArea) {
+            resultArea.innerHTML = `
+                <div class="card" style="border: 1px solid #fee2e2; background: #fff5f5; padding: 20px; text-align: center;">
+                    <i class="ph ph-warning-circle" style="font-size: 36px; color: #dc2626; margin-bottom: 8px;"></i>
+                    <h4 style="color: #dc2626; font-size: 16px; margin-bottom: 6px;">Report Generation Failed</h4>
+                    <p style="color: #7f1d1d; font-size: 13px;">${err.message || 'Unable to load report from server.'}</p>
+                    <button type="button" onclick="generateAIReport()" class="btn-modern btn-modern-primary" style="margin-top: 12px; width: auto;">
+                        Try Again
+                    </button>
+                </div>
+            `;
+            resultArea.style.display = 'block';
+        }
+    } finally {
+        if (loader) loader.style.display = 'none';
+        if (generateBtn) generateBtn.disabled = false;
+    }
+}
+
+// Attach to window and app for global availability
+window.openAIReportModal = openAIReportModal;
+window.closeAIReportModal = closeAIReportModal;
+window.selectReportPeriod = selectReportPeriod;
+window.generateAIReport = generateAIReport;
+
+if (window.app) {
+    window.app.openAIReportModal = openAIReportModal;
+    window.app.closeAIReportModal = closeAIReportModal;
+}

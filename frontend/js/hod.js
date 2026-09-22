@@ -48,8 +48,8 @@ async function loadHODDashboard() {
                             <button onclick="loadModule('dept-statistics')" class="btn-modern" style="background: #f1f5f9; color: var(--text-main); width: auto;">
                                 <i class="ph ph-presentation"></i> Detailed Reports
                             </button>
-                            <button onclick="window.open('${app.API_BASE}/hod/download-history', '_blank')" class="btn-modern" style="background: #eff6ff; color: #1d4ed8; width: auto; border: 1px solid #dbeafe;">
-                                <i class="ph ph-file-pdf"></i> Download Monthly Dept Report
+                            <button onclick="openAIReportModal()" class="btn-modern" style="background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); color: white; width: auto; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.25);">
+                                <i class="ph ph-sparkle"></i> AI Department Report
                             </button>
                         </div>
                     </div>
@@ -401,8 +401,8 @@ async function loadAllOutpasses() {
                         <p style="color: var(--text-muted);">Historical tracking of all departmental outpass transactions.</p>
                     </div>
                     <div style="display: flex; gap: 1rem;">
-                        <button onclick="window.open('${app.API_BASE}/hod/download-history', '_blank')" class="btn-modern" style="width: auto; background: #eff6ff; color: #1d4ed8;">
-                            <i class="ph ph-file-pdf"></i> Export PDF History
+                        <button onclick="openAIReportModal()" class="btn-modern" style="width: auto; background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); color: white; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.25);">
+                            <i class="ph ph-sparkle"></i> AI Department Report
                         </button>
                         <div style="background: var(--primary-gradient); padding: 10px 20px; border-radius: 40px; color: white; font-size: 14px; font-weight: 700; box-shadow: var(--shadow-md);">
                             ${data.outpasses.length} Synchronized Records

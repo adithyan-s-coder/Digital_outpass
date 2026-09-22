@@ -5,7 +5,10 @@ Includes authentication, QR code generation, validation, etc.
 
 import hashlib
 import secrets
-import qrcode
+try:
+    import qrcode
+except ImportError:
+    qrcode = None
 import io
 import base64
 from datetime import datetime, timedelta

@@ -20,5 +20,5 @@ pypng
 typing_extensions
 Werkzeug
 twilio
-fpdf2
+requests
 certifi

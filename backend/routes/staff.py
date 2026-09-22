@@ -9,9 +9,8 @@ from backend.utils.helpers import (
     role_required, format_datetime, format_date, format_time,
     log_action, get_client_ip, generate_unique_qr_token, generate_qr_code, get_ist_now
 )
-from backend.utils.pdf_generator import generate_staff_monthly_report
 from datetime import datetime, timedelta
-from flask import Response
+from backend.services.ai_report import calculate_outpass_stats, generate_ai_summary, get_date_range
 
 staff_bp = Blueprint('staff', __name__, url_prefix='/api/staff')
 
@@ -392,60 +391,69 @@ def get_staff_stats():
         print(f"Get stats error: {e}")
         return jsonify({'success': False, 'message': 'Failed to fetch statistics'}), 500
 
-@staff_bp.route('/download-history', methods=['GET'])
-@role_required('staff')
-def download_history():
-    """Download monthly outpass history report for staff"""
+@staff_bp.route('/ai-report', methods=['POST'])
+@role_required('staff', 'hod')
+def get_ai_report():
+    """Generate AI-powered statistical outpass report for advisor's students"""
     try:
+        data = request.get_json(silent=True) or {}
+        period = data.get('period', 'today')
+        custom_start = data.get('start_date')
+        custom_end = data.get('end_date')
+
+        start_date, end_date, period_label = get_date_range(period, custom_start, custom_end)
+
         conn = get_db_connection()
         if not conn:
             return jsonify({'success': False, 'message': 'Database connection failed'}), 500
-        
+
         cursor = conn.cursor(dictionary=True)
-        
-        # Get processed requests for this month for this advisor
+
+        # Get staff member's info
+        cursor.execute("SELECT full_name FROM users WHERE user_id = %s", (session['user_id'],))
+        staff_user = cursor.fetchone()
+        staff_name = staff_user['full_name'] if staff_user else 'Advisor'
+
+        # Fetch outpass records for this advisor's students within the selected date range
         query = """
             SELECT 
                 o.*,
                 s.full_name as student_name,
-                s.registration_no
+                s.registration_no,
+                s.academic_year,
+                d.dept_name
             FROM outpasses o
             JOIN users s ON o.student_id = s.user_id
-            WHERE o.advisor_id = %s 
-            AND o.advisor_status != 'pending'
-            AND MONTH(o.advisor_action_time) = MONTH(CURRENT_DATE())
-            AND YEAR(o.advisor_action_time) = YEAR(CURRENT_DATE())
-            ORDER BY o.advisor_action_time DESC
+            LEFT JOIN departments d ON s.dept_id = d.dept_id
+            WHERE o.advisor_id = %s
+              AND o.out_date BETWEEN %s AND %s
+            ORDER BY o.out_date DESC, o.out_time DESC
         """
-        
-        cursor.execute(query, (session['user_id'],))
+        cursor.execute(query, (session['user_id'], start_date, end_date))
         records = cursor.fetchall()
-        
-        # Format dates for PDF
-        for rec in records:
-            rec['out_date'] = format_date(rec['out_date'])
-            
-        # Get staff name
-        cursor.execute("SELECT full_name FROM users WHERE user_id = %s", (session['user_id'],))
-        staff_user = cursor.fetchone()
-        staff_name = staff_user['full_name'] if staff_user else 'Staff'
-        
+
         cursor.close()
         conn.close()
-        
-        now = get_ist_now()
-        month_name = now.strftime('%B')
-        year = now.strftime('%Y')
-        
-        pdf_bytes = generate_staff_monthly_report(staff_name, month_name, year, records)
-        
-        # Use Response to return binary PDF
-        return Response(
-            bytes(pdf_bytes),
-            mimetype="application/pdf",
-            headers={"Content-disposition": f"attachment; filename=Outpass_History_{month_name}_{year}.pdf"}
-        )
-        
+
+        # Calculate real statistical metrics
+        stats = calculate_outpass_stats(records)
+
+        # Generate AI summary and key insights with deterministic fallback
+        scope_label = f"Advisor: {staff_name}"
+        ai_result = generate_ai_summary(stats, period_label, scope_label)
+
+        return jsonify({
+            'success': True,
+            'period': period,
+            'period_label': period_label,
+            'start_date': start_date,
+            'end_date': end_date,
+            'scope': scope_label,
+            'generated_at': get_ist_now().strftime('%d %b %Y, %I:%M %p'),
+            'stats': stats,
+            'report': ai_result
+        }), 200
+
     except Exception as e:
-        print(f"Download history error: {e}")
-        return jsonify({'success': False, 'message': 'Failed to generate PDF history'}), 500
+        print(f"Generate staff AI report error: {e}")
+        return jsonify({'success': False, 'message': 'Failed to generate AI report'}), 500

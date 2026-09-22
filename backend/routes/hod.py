@@ -10,9 +10,8 @@ from backend.utils.helpers import (
     log_action, get_client_ip, generate_unique_qr_token, generate_qr_code,
     send_sms_notification, get_ist_now
 )
-from backend.utils.pdf_generator import generate_hod_monthly_report
 from datetime import datetime, timedelta
-from flask import Response
+from backend.services.ai_report import calculate_outpass_stats, generate_ai_summary, get_date_range
 
 import re
 hod_bp = Blueprint('hod', __name__, url_prefix='/api/hod')
@@ -503,96 +502,79 @@ def get_all_department_outpasses():
         print(f"Get all outpasses error: {e}")
         return jsonify({'success': False, 'message': 'Failed to fetch outpasses'}), 500
 
-@hod_bp.route('/download-history', methods=['GET'])
+@hod_bp.route('/ai-report', methods=['POST'])
 @role_required('hod')
-def download_history():
-    """Download monthly outpass history report for HOD"""
+def get_ai_report():
+    """Generate AI-powered statistical outpass report for HOD's department"""
     try:
+        data = request.get_json(silent=True) or {}
+        period = data.get('period', 'today')
+        custom_start = data.get('start_date')
+        custom_end = data.get('end_date')
+
+        start_date, end_date, period_label = get_date_range(period, custom_start, custom_end)
+
         conn = get_db_connection()
         if not conn:
             return jsonify({'success': False, 'message': 'Database connection failed'}), 500
-        
+
         cursor = conn.cursor(dictionary=True)
-        
+
         # Get HOD's department
         cursor.execute("SELECT u.dept_id, d.dept_name FROM users u JOIN departments d ON u.dept_id = d.dept_id WHERE u.user_id = %s", (session['user_id'],))
         hod_info = cursor.fetchone()
-        
+
         if not hod_info:
             cursor.close()
             conn.close()
             return jsonify({'success': False, 'message': 'Department not found'}), 404
-            
+
         dept_id = hod_info['dept_id']
         dept_name = hod_info['dept_name']
-        
-        # Get department name and records for current month
-        # Improved query to join with users and get academic_year
-        current_year = get_ist_now().year
-        current_month = get_ist_now().month
-        cursor.execute("""
-            SELECT o.*, u.full_name as student_name, u.registration_no, u.academic_year, d.dept_name, a.full_name as advisor_name
+
+        # Fetch department outpass records for the date range
+        query = """
+            SELECT 
+                o.*,
+                s.full_name as student_name,
+                s.registration_no,
+                s.academic_year,
+                d.dept_name,
+                a.full_name as advisor_name
             FROM outpasses o
-            JOIN users u ON o.student_id = u.user_id
-            JOIN departments d ON u.dept_id = d.dept_id
+            JOIN users s ON o.student_id = s.user_id
+            JOIN departments d ON s.dept_id = d.dept_id
             LEFT JOIN users a ON o.advisor_id = a.user_id
-            WHERE u.dept_id = %s 
-            AND o.final_status IN ('approved', 'used')
-            AND (
-                (o.advisor_action_time IS NOT NULL AND MONTH(o.advisor_action_time) = %s AND YEAR(o.advisor_action_time) = %s)
-                OR (o.hod_action_time IS NOT NULL AND MONTH(o.hod_action_time) = %s AND YEAR(o.hod_action_time) = %s)
-            )
-            ORDER BY u.academic_year ASC, o.out_date DESC
-        """, (dept_id, current_month, current_year, current_month, current_year))
+            WHERE s.dept_id = %s
+              AND o.out_date BETWEEN %s AND %s
+            ORDER BY o.out_date DESC, o.out_time DESC
+        """
+        cursor.execute(query, (dept_id, start_date, end_date))
         records = cursor.fetchall()
-        
-        # Group by year logic
-        # Assuming format like ABCD2023001 or 2023CSE001
-        # We'll try to extract the 4-digit year from the registration number
-        import re
-        # current_year and current_month are already defined above
-        # Academic year transition (assuming July start) - not strictly needed for grouping by academic_year column
-        
-        records_by_year = {} # Initialize as empty dict to allow dynamic keys
-        
-        for rec in records:
-            rec['out_date'] = format_date(rec['out_date'])
-            # Use academic_year if available, otherwise fallback to registration_no inference
-            year_level = rec.get('academic_year')
-            
-            if not year_level:
-                # Fallback to existing logic if academic_year is missing
-                reg_no = rec.get('registration_no') or ''
-                match = re.search(r'(\d{4})', reg_no)
-                if match:
-                    batch_year = int(match.group(1))
-                    academic_start_year = current_year if current_month >= 7 else current_year - 1
-                    calc_year = academic_start_year - batch_year + 1
-                    year_level = min(max(calc_year, 1), 3) # Cap between 1 and 3
-                else:
-                    year_level = 0 # Unknown
-            
-            year_label = f"Year {year_level}" if year_level > 0 else "Unknown Year"
-            
-            if year_label not in records_by_year:
-                records_by_year[year_label] = []
-            records_by_year[year_label].append(rec)
-     
+
         cursor.close()
         conn.close()
-        
-        now = get_ist_now()
-        month_name = now.strftime('%B')
-        year = now.strftime('%Y')
-        
-        pdf_bytes = generate_hod_monthly_report(dept_name, month_name, year, records_by_year)
-        
-        return Response(
-            bytes(pdf_bytes),
-            mimetype="application/pdf",
-            headers={"Content-disposition": f"attachment; filename=Dept_Outpass_History_{month_name}_{year}.pdf"}
-        )
-        
+
+        # Calculate real statistical metrics
+        stats = calculate_outpass_stats(records)
+
+        # Generate AI summary and key insights with deterministic fallback
+        scope_label = f"Department of {dept_name}"
+        ai_result = generate_ai_summary(stats, period_label, scope_label)
+
+        return jsonify({
+            'success': True,
+            'period': period,
+            'period_label': period_label,
+            'start_date': start_date,
+            'end_date': end_date,
+            'scope': scope_label,
+            'department': dept_name,
+            'generated_at': get_ist_now().strftime('%d %b %Y, %I:%M %p'),
+            'stats': stats,
+            'report': ai_result
+        }), 200
+
     except Exception as e:
-        print(f"Download history HOD error: {e}")
-        return jsonify({'success': False, 'message': 'Failed to generate PDF history'}), 500
+        print(f"Generate HOD AI report error: {e}")
+        return jsonify({'success': False, 'message': 'Failed to generate departmental AI report'}), 500
