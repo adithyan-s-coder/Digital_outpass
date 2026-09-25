@@ -745,3 +745,21 @@ def export_report():
     except Exception as e:
         print(f"Export report error: {e}")
         return jsonify({'success': False, 'message': 'Failed to export report'}), 500
+
+
+@admin_bp.route('/trigger-daily-hod-reports', methods=['POST'])
+@role_required('admin')
+def trigger_all_hod_daily_reports():
+    """
+    Admin trigger: Dispatch daily outpass report emails to all HOD Gmail addresses for today's outpasses.
+    """
+    try:
+        from backend.services.daily_report_service import dispatch_daily_hod_reports
+        data = request.get_json(silent=True) or {}
+        target_date = data.get('target_date')
+
+        res = dispatch_daily_hod_reports(target_date)
+        return jsonify(res), 200
+    except Exception as e:
+        print(f"Admin trigger daily report error: {e}")
+        return jsonify({'success': False, 'message': f'Failed to trigger daily reports: {str(e)}'}), 500

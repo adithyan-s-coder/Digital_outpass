@@ -21,9 +21,15 @@ app.register_blueprint(hod_bp)
 app.register_blueprint(security_bp)
 app.register_blueprint(admin_bp)
 
-# Initialize database on startup
+# Initialize database on startup and start daily 4:10 PM HOD report scheduler
 with app.app_context():
     init_db()
+    try:
+        from backend.services.scheduler import start_daily_scheduler
+        start_daily_scheduler(app)
+    except Exception as e:
+        print(f"[WARN] Failed to start daily report scheduler: {e}")
+
 
 # Manual Database Initialization Route (Use only if needed)
 @app.route('/api/admin/init-db', methods=['POST'])

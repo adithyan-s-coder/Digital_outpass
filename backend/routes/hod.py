@@ -578,3 +578,58 @@ def get_ai_report():
     except Exception as e:
         print(f"Generate HOD AI report error: {e}")
         return jsonify({'success': False, 'message': 'Failed to generate departmental AI report'}), 500
+
+
+@hod_bp.route('/send-daily-report', methods=['POST'])
+@role_required('hod')
+def trigger_hod_daily_report_email():
+    """
+    Manually trigger sending the Daily Department Outpass Report email to the logged-in HOD's email.
+    """
+    try:
+        from backend.services.daily_report_service import generate_department_daily_report, send_email_via_smtp
+
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({'success': False, 'message': 'Database connection failed'}), 500
+
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT dept_id, email, full_name FROM users WHERE user_id = %s", (session['user_id'],))
+        hod = cursor.fetchone()
+        cursor.close()
+        conn.close()
+
+        if not hod or not hod['dept_id']:
+            return jsonify({'success': False, 'message': 'Department or HOD account not found'}), 404
+
+        # Generate report for today
+        report = generate_department_daily_report(hod['dept_id'])
+
+        # HOD email from user record or session
+        target_email = hod['email']
+
+        success, msg = send_email_via_smtp(
+            to_email=target_email,
+            subject=report['subject'],
+            html_content=report['html_content'],
+            text_content=report['text_content']
+        )
+
+        if success:
+            return jsonify({
+                'success': True,
+                'message': f"Daily Outpass Report email sent successfully to {target_email}!",
+                'recipient': target_email,
+                'department': report['dept_name'],
+                'stats': report['stats']
+            }), 200
+        else:
+            return jsonify({
+                'success': False,
+                'message': f"Failed to send email: {msg}",
+                'recipient': target_email
+            }), 500
+
+    except Exception as e:
+        print(f"Trigger HOD daily report email error: {e}")
+        return jsonify({'success': False, 'message': f'Error generating/sending daily report: {str(e)}'}), 500

@@ -51,6 +51,9 @@ async function loadHODDashboard() {
                             <button onclick="openAIReportModal()" class="btn-modern" style="background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); color: white; width: auto; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.25);">
                                 <i class="ph ph-sparkle"></i> AI Department Report
                             </button>
+                            <button onclick="sendHODDailyReportEmail()" class="btn-modern" style="background: linear-gradient(135deg, #059669 0%, #10b981 100%); color: white; width: auto; box-shadow: 0 4px 12px rgba(5, 150, 105, 0.25);">
+                                <i class="ph ph-envelope-simple"></i> Send Daily Report (4:10 PM)
+                            </button>
                         </div>
                     </div>
                     <div style="width: 100%; background: #f8fafc; border-radius: 1.25rem; padding: 2rem; border: 1px solid #f1f5f9; text-align: center;">
@@ -500,5 +503,36 @@ async function loadAllOutpasses() {
                     <i class="ph ph-arrow-clockwise"></i> Try Again
                 </button>
             </div>`;
+    }
+}
+
+async function sendHODDailyReportEmail() {
+    try {
+        if (typeof app !== 'undefined' && app.showToast) {
+            app.showToast('Generating and dispatching daily outpass report to your email...', 'info');
+        }
+        const response = await fetch(`${app.API_BASE}/hod/send-daily-report`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        const data = await response.json();
+        if (data.success) {
+            if (typeof app !== 'undefined' && app.showToast) {
+                app.showToast(data.message, 'success');
+            } else {
+                alert(data.message);
+            }
+        } else {
+            if (typeof app !== 'undefined' && app.showToast) {
+                app.showToast(data.message || 'Failed to send report email', 'error');
+            } else {
+                alert(data.message || 'Failed to send report email');
+            }
+        }
+    } catch (err) {
+        console.error('Error sending daily report email:', err);
+        if (typeof app !== 'undefined' && app.showToast) {
+            app.showToast('Network error while sending daily report email', 'error');
+        }
     }
 }
