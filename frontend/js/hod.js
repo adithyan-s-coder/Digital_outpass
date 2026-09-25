@@ -313,9 +313,14 @@ async function loadDeptStatistics() {
         if (data.success) {
             const stats = data.statistics;
             let html = `
-                <div style="margin-bottom: 40px; animation: fadeIn 0.4s ease-out;">
-                    <h2 style="font-size: 36px; font-weight: 700; color: var(--text-main); letter-spacing: -0.02em;">Department Analytics</h2>
-                    <p style="color: var(--text-muted);">Real-time monitoring of departmental outpass metrics.</p>
+                <div style="margin-bottom: 40px; display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 1rem; animation: fadeIn 0.4s ease-out;">
+                    <div>
+                        <h2 style="font-size: 36px; font-weight: 700; color: var(--text-main); letter-spacing: -0.02em;">Department Analytics</h2>
+                        <p style="color: var(--text-muted);">Real-time monitoring of departmental outpass metrics.</p>
+                    </div>
+                    <button onclick="sendHODDailyReportEmail()" class="btn-modern" style="background: linear-gradient(135deg, #059669 0%, #10b981 100%); color: white; width: auto; box-shadow: 0 4px 12px rgba(5, 150, 105, 0.25);">
+                        <i class="ph ph-envelope-simple"></i> Send Daily Report (4:10 PM)
+                    </button>
                 </div>
                 
                 <div class="stats-grid">
