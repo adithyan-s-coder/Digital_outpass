@@ -7,7 +7,22 @@
     <title>Digital Pass | Institutional Outpass Portal</title>
     <link rel="icon" type="image/svg+xml" href="assets/images/favicon.svg">
     <link rel="apple-touch-icon" href="assets/images/favicon.svg">
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#059669">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/sw.js')
+                    .then(reg => console.log('✅ PWA ServiceWorker Active'))
+                    .catch(err => console.log('ServiceWorker error:', err));
+            });
+        }
+    </script>
     <link rel="stylesheet" href="css/index.css">
+
     <!-- Phosphor Icons -->
     <script src="https://unpkg.com/@phosphor-icons/web"></script>
     <!-- QR Scanner Library -->

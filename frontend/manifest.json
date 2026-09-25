@@ -1,0 +1,24 @@
+{
+  "name": "Smart Outpass Management System",
+  "short_name": "Digital Outpass",
+  "description": "Institutional Smart Outpass Management & Gate Verification System",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0f172a",
+  "theme_color": "#059669",
+  "icons": [
+    {
+      "src": "assets/images/favicon.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "assets/images/favicon.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
