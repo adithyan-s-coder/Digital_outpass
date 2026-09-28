@@ -356,12 +356,13 @@ def get_departments():
         
         cursor.execute("""
             SELECT 
-                d.*,
-                COALESCE(SUM(CASE WHEN u.role = 'student' AND u.is_active = TRUE THEN 1 ELSE 0 END), 0) as student_count,
-                COALESCE(SUM(CASE WHEN u.role = 'staff' AND u.is_active = TRUE THEN 1 ELSE 0 END), 0) as staff_count
+                d.dept_id,
+                d.dept_name,
+                d.dept_code,
+                d.created_at,
+                (SELECT COUNT(*) FROM users u WHERE u.dept_id = d.dept_id AND u.role = 'student' AND u.is_active = TRUE) as student_count,
+                (SELECT COUNT(*) FROM users u WHERE u.dept_id = d.dept_id AND u.role = 'staff' AND u.is_active = TRUE) as staff_count
             FROM departments d
-            LEFT JOIN users u ON d.dept_id = u.dept_id
-            GROUP BY d.dept_id
             ORDER BY d.dept_name
         """)
         
@@ -369,6 +370,8 @@ def get_departments():
         
         for dept in departments:
             dept['created_at'] = format_datetime(dept['created_at'])
+            dept['student_count'] = int(dept.get('student_count') or 0)
+            dept['staff_count'] = int(dept.get('staff_count') or 0)
         
         return jsonify({
             'success': True,
@@ -607,6 +610,9 @@ def get_system_report():
             GROUP BY role
         """)
         user_stats = cursor.fetchall()
+        for u in user_stats:
+            u['count'] = int(u.get('count') or 0)
+            u['active_count'] = int(u.get('active_count') or 0)
         
         # Outpass statistics
         cursor.execute("""
@@ -624,23 +630,25 @@ def get_system_report():
             outpass_stats = {'total': 0, 'pending': 0, 'approved': 0, 'rejected': 0, 'used': 0}
         else:
             for k in ['total', 'pending', 'approved', 'rejected', 'used']:
-                if outpass_stats.get(k) is None:
-                    outpass_stats[k] = 0
+                outpass_stats[k] = int(outpass_stats.get(k) or 0)
         
-        # Department-wise statistics
+        # Department-wise statistics (ONLY_FULL_GROUP_BY compatible)
         cursor.execute("""
             SELECT 
                 d.dept_name,
                 COUNT(o.outpass_id) as total_outpasses,
-                SUM(CASE WHEN o.final_status = 'approved' THEN 1 ELSE 0 END) as approved,
-                SUM(CASE WHEN o.final_status = 'rejected' THEN 1 ELSE 0 END) as rejected
+                COALESCE(SUM(CASE WHEN o.final_status = 'approved' THEN 1 ELSE 0 END), 0) as approved,
+                COALESCE(SUM(CASE WHEN o.final_status = 'rejected' THEN 1 ELSE 0 END), 0) as rejected
             FROM departments d
             LEFT JOIN users s ON d.dept_id = s.dept_id
-            LEFT JOIN outpasses o ON s.user_id = o.student_id
-            WHERE o.created_at BETWEEN %s AND %s OR o.created_at IS NULL
-            GROUP BY d.dept_id
+            LEFT JOIN outpasses o ON s.user_id = o.student_id AND (o.created_at BETWEEN %s AND %s)
+            GROUP BY d.dept_id, d.dept_name
         """, (from_date, to_date))
         dept_stats = cursor.fetchall()
+        for ds in dept_stats:
+            ds['total_outpasses'] = int(ds.get('total_outpasses') or 0)
+            ds['approved'] = int(ds.get('approved') or 0)
+            ds['rejected'] = int(ds.get('rejected') or 0)
         
         # Top reasons
         cursor.execute("""

@@ -344,11 +344,38 @@ def register():
         cursor = conn.cursor()
         
         try:
+            dept_id_val = data.get('dept_id') or None
+            year_val = data.get('academic_year') or None
+            advisor_id_val = None
+
+            # Auto-find advisor when a student registers
+            if role == 'student' and dept_id_val:
+                if year_val:
+                    cursor.execute("""
+                        SELECT user_id FROM users
+                        WHERE role = 'staff' AND is_active = TRUE
+                          AND dept_id = %s AND academic_year = %s
+                        LIMIT 1
+                    """, (dept_id_val, year_val))
+                    adv_row = cursor.fetchone()
+                    if adv_row:
+                        advisor_id_val = adv_row[0]
+                if not advisor_id_val:
+                    cursor.execute("""
+                        SELECT user_id FROM users
+                        WHERE role = 'staff' AND is_active = TRUE
+                          AND dept_id = %s
+                        LIMIT 1
+                    """, (dept_id_val,))
+                    adv_row = cursor.fetchone()
+                    if adv_row:
+                        advisor_id_val = adv_row[0]
+
             # Insert new user
             query = """
                 INSERT INTO users (username, email, password_hash, full_name, role, 
-                                 registration_no, phone, dept_id, academic_year, parent_name, parent_mobile, profile_image)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                 registration_no, phone, dept_id, academic_year, advisor_id, parent_name, parent_mobile, profile_image)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
             # Sanitize optional fields: convert empty strings to None (stored as NULL in DB)
             reg_no = data.get('registration_no', '').strip() or None
@@ -362,8 +389,9 @@ def register():
                 role,
                 reg_no,
                 phone,
-                data.get('dept_id') or None,
-                data.get('academic_year') or None,
+                dept_id_val,
+                year_val,
+                advisor_id_val,
                 p_name,
                 parent_mobile,
                 profile_image_path
@@ -371,6 +399,25 @@ def register():
             
             conn.commit()
             user_id = cursor.lastrowid
+
+            # When a staff advisor registers, link unassigned students in their dept & academic year
+            if role == 'staff' and dept_id_val:
+                try:
+                    if year_val:
+                        cursor.execute("""
+                            UPDATE users SET advisor_id = %s
+                            WHERE role = 'student' AND advisor_id IS NULL
+                              AND dept_id = %s AND academic_year = %s
+                        """, (user_id, dept_id_val, year_val))
+                    else:
+                        cursor.execute("""
+                            UPDATE users SET advisor_id = %s
+                            WHERE role = 'student' AND advisor_id IS NULL
+                              AND dept_id = %s
+                        """, (user_id, dept_id_val))
+                    conn.commit()
+                except Exception:
+                    pass
             
             cursor.close()
             conn.close()

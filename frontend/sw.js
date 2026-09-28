@@ -1,16 +1,16 @@
 // Smart Outpass PWA Service Worker (Optimized Stale-While-Revalidate)
-const CACHE_NAME = 'outpass-cache-v3';
+const CACHE_NAME = 'outpass-cache-v4';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
   '/manifest.json',
   '/css/index.css?v=1.3',
-  '/js/app.js?v=1.3',
-  '/js/student.js?v=1.3',
-  '/js/staff.js?v=1.3',
-  '/js/hod.js?v=1.3',
-  '/js/security.js?v=1.3',
-  '/js/admin.js?v=1.3',
+  '/js/app.js?v=1.4',
+  '/js/student.js?v=1.4',
+  '/js/staff.js?v=1.4',
+  '/js/hod.js?v=1.4',
+  '/js/security.js?v=1.4',
+  '/js/admin.js?v=1.4',
   '/assets/images/favicon.svg'
 ];
 

@@ -346,25 +346,29 @@ async function loadMyStudents() {
                         <tbody>
             `;
 
-            data.students.forEach(s => {
-                html += `
-                    <tr>
-                        <td>
-                            <div style="display: flex; align-items: center; gap: 10px;">
-                                ${app.getAvatarHtml(s.profile_image, s.full_name, 36, '10px')}
-                                <span style="font-weight: 600;">${s.full_name}</span>
-                            </div>
-                        </td>
-                        <td style="color: var(--secondary); font-size: 13px; font-weight: 600;">
-                            ${app.formatYear(s.academic_year)} - ${s.dept_name || 'N/A'}
-                        </td>
-                        <td>${s.registration_no}</td>
-                        <td>${s.email}</td>
-                        <td>${s.total_outpasses || 0}</td>
-                        <td><button onclick="viewStudentHistory(${s.user_id})" class="btn btn-sm btn-primary">History</button></td>
-                    </tr>
-                `;
-            });
+            if (!data.students || data.students.length === 0) {
+                html += `<tr><td colspan="6" style="text-align: center; padding: 32px; color: var(--text-muted);">No students found in your class/department yet.</td></tr>`;
+            } else {
+                data.students.forEach(s => {
+                    html += `
+                        <tr>
+                            <td>
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    ${app.getAvatarHtml(s.profile_image, s.full_name, 36, '10px')}
+                                    <span style="font-weight: 600;">${s.full_name}</span>
+                                </div>
+                            </td>
+                            <td style="color: var(--secondary); font-size: 13px; font-weight: 600;">
+                                ${app.formatYear(s.academic_year)} - ${s.dept_name || 'N/A'}
+                            </td>
+                            <td>${s.registration_no || '-'}</td>
+                            <td>${s.email || '-'}</td>
+                            <td>${s.total_outpasses || 0}</td>
+                            <td style="text-align: right;"><button onclick="viewStudentHistory(${s.user_id})" class="btn-modern btn-modern-primary" style="padding: 6px 14px; font-size: 13px; width: auto;">History</button></td>
+                        </tr>
+                    `;
+                });
+            }
 
             html += `</tbody></table></div></div>`;
             document.getElementById('moduleContent').innerHTML = html;
@@ -374,7 +378,7 @@ async function loadMyStudents() {
                     <i class="ph ph-warning-circle" style="font-size: 3rem; color: var(--danger); margin-bottom: 1rem;"></i>
                     <h3 style="margin-bottom: 0.5rem;">Failed to load students</h3>
                     <p style="color: var(--text-muted); margin-bottom: 1.5rem;">${data.message || 'Error loading students'}</p>
-                    <button onclick="loadMyStudents()" class="btn-modern btn-modern-primary" style="margin: 0 auto; width: auto;">
+                    <button onclick="app.clearApiCache(); loadMyStudents()" class="btn-modern btn-modern-primary" style="margin: 0 auto; width: auto;">
                         <i class="ph ph-arrow-clockwise"></i> Try Again
                     </button>
                 </div>`;
@@ -386,7 +390,7 @@ async function loadMyStudents() {
                 <i class="ph ph-warning-circle" style="font-size: 3rem; color: var(--danger); margin-bottom: 1rem;"></i>
                 <h3 style="margin-bottom: 0.5rem;">Failed to load students</h3>
                 <p style="color: var(--text-muted); margin-bottom: 1.5rem;">${error.message || 'Network error occurred while fetching students.'}</p>
-                <button onclick="loadMyStudents()" class="btn-modern btn-modern-primary" style="margin: 0 auto; width: auto;">
+                <button onclick="app.clearApiCache(); loadMyStudents()" class="btn-modern btn-modern-primary" style="margin: 0 auto; width: auto;">
                     <i class="ph ph-arrow-clockwise"></i> Try Again
                 </button>
             </div>`;
@@ -400,8 +404,17 @@ async function viewStudentHistory(studentId) {
 
         if (data.success) {
             let html = `
-                <div class="mb-4">
-                    <h2 class="login-title" style="font-size: 1.5rem;">${data.student.full_name} - History</h2>
+                <div class="mb-4" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        ${app.getAvatarHtml(data.student.profile_image, data.student.full_name, 44, '12px')}
+                        <div>
+                            <h2 class="login-title" style="font-size: 1.5rem; margin-bottom: 2px;">${data.student.full_name} - History</h2>
+                            <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0;">${data.student.registration_no || ''} | ${data.student.dept_name || ''}</p>
+                        </div>
+                    </div>
+                    <button onclick="loadModule('my-students')" class="btn-modern" style="width: auto; background: #f1f5f9; color: var(--text-main);">
+                        <i class="ph ph-arrow-left"></i> Back to Students
+                    </button>
                 </div>
                 <div class="table-wrapper">
                     <div class="table-responsive">
@@ -409,9 +422,13 @@ async function viewStudentHistory(studentId) {
                         <thead><tr><th>Dept</th><th>Date</th><th>Reason</th><th>Status</th></tr></thead>
                         <tbody>`;
 
-            data.history.forEach(h => {
-                html += `<tr><td style="color: var(--secondary); font-size: 13px; font-weight: 600;">${app.formatYear(data.student.academic_year)} - ${data.student.dept_name}</td><td>${app.formatDate(h.out_date)}</td><td>${h.reason}</td><td>${app.getStatusBadge(h.final_status)}</td></tr>`;
-            });
+            if (!data.history || data.history.length === 0) {
+                html += `<tr><td colspan="4" style="text-align: center; padding: 24px; color: var(--text-muted);">No outpass history found for this student.</td></tr>`;
+            } else {
+                data.history.forEach(h => {
+                    html += `<tr><td style="color: var(--secondary); font-size: 13px; font-weight: 600;">${app.formatYear(data.student.academic_year)} - ${data.student.dept_name}</td><td>${app.formatDate(h.out_date)}</td><td>${h.reason}</td><td>${app.getStatusBadge(h.final_status)}</td></tr>`;
+                });
+            }
 
             html += `</tbody></table></div></div>`;
             document.getElementById('moduleContent').innerHTML = html;

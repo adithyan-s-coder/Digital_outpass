@@ -221,24 +221,17 @@ def get_student_history(student_id):
         
         cursor = conn.cursor(dictionary=True)
         
-        # Verify student belongs to advisor's advisees
+        # Verify student belongs to advisor's advisees or same department
         cursor.execute("""
             SELECT u.*, d.dept_name FROM users u 
             LEFT JOIN departments d ON u.dept_id = d.dept_id
-            WHERE u.user_id = %s AND u.advisor_id = %s
-        """, (student_id, session['user_id']))
+            LEFT JOIN users staff ON staff.user_id = %s
+            WHERE u.user_id = %s 
+              AND u.role = 'student'
+              AND (u.advisor_id = %s OR u.dept_id = staff.dept_id)
+        """, (session['user_id'], student_id, session['user_id']))
         
         student = cursor.fetchone()
-        
-        # If HOD, can view any student in department
-        if not student and session['role'] == 'hod':
-            cursor.execute("""
-                SELECT u.*, d.dept_name FROM users u
-                JOIN users h ON u.dept_id = h.dept_id
-                LEFT JOIN departments d ON u.dept_id = d.dept_id
-                WHERE u.user_id = %s AND h.user_id = %s
-            """, (student_id, session['user_id']))
-            student = cursor.fetchone()
         
         if not student:
             cursor.close()
@@ -291,16 +284,48 @@ def get_student_history(student_id):
         return jsonify({'success': False, 'message': 'Failed to fetch student history'}), 500
 
 @staff_bp.route('/my-students', methods=['GET'])
-@role_required('staff')
+@role_required('staff', 'hod')
 def get_my_students():
-    """Get list of students assigned to this advisor"""
+    """Get list of students assigned to this advisor (or in advisor's department & academic year)"""
+    conn = None
+    cursor = None
     try:
         conn = get_db_connection()
         if not conn:
             return jsonify({'success': False, 'message': 'Database connection failed'}), 500
         
         cursor = conn.cursor(dictionary=True)
-        
+        uid = session['user_id']
+
+        # Get staff advisor's department and academic year
+        cursor.execute("SELECT dept_id, academic_year FROM users WHERE user_id = %s", (uid,))
+        staff_info = cursor.fetchone() or {}
+        dept_id = staff_info.get('dept_id')
+        academic_year = staff_info.get('academic_year')
+
+        # Auto-assign unassigned students in the same department & academic year to this staff advisor
+        if dept_id:
+            try:
+                if academic_year:
+                    cursor.execute("""
+                        UPDATE users
+                        SET advisor_id = %s
+                        WHERE role = 'student' AND advisor_id IS NULL
+                          AND dept_id = %s AND academic_year = %s
+                    """, (uid, dept_id, academic_year))
+                else:
+                    cursor.execute("""
+                        UPDATE users
+                        SET advisor_id = %s
+                        WHERE role = 'student' AND advisor_id IS NULL
+                          AND dept_id = %s
+                    """, (uid, dept_id))
+                if cursor.rowcount > 0:
+                    conn.commit()
+            except Exception:
+                pass
+
+        # Use scalar subqueries for outpass counts to avoid ONLY_FULL_GROUP_BY errors on MySQL 8 / TiDB
         cursor.execute("""
             SELECT 
                 u.user_id,
@@ -312,23 +337,25 @@ def get_my_students():
                 u.parent_mobile,
                 u.profile_image,
                 d.dept_name,
-                COUNT(o.outpass_id) as total_outpasses,
-                SUM(CASE WHEN o.final_status = 'pending' THEN 1 ELSE 0 END) as pending_count
+                (SELECT COUNT(*) FROM outpasses o WHERE o.student_id = u.user_id) as total_outpasses,
+                (SELECT COUNT(*) FROM outpasses o WHERE o.student_id = u.user_id AND o.final_status = 'pending') as pending_count
             FROM users u
             LEFT JOIN departments d ON u.dept_id = d.dept_id
-            LEFT JOIN outpasses o ON u.user_id = o.student_id
-            WHERE u.advisor_id = %s AND u.role = 'student' AND u.is_active = TRUE
-            GROUP BY u.user_id
+            WHERE u.role = 'student'
+              AND u.is_active = TRUE
+              AND (
+                  u.advisor_id = %s
+                  OR (%s IS NOT NULL AND u.dept_id = %s AND (%s IS NULL OR u.academic_year = %s))
+              )
             ORDER BY u.full_name
-        """, (session['user_id'],))
+        """, (uid, dept_id, dept_id, academic_year, academic_year))
         
         students = cursor.fetchall()
         for s in students:
+            s['total_outpasses'] = int(s.get('total_outpasses') or 0)
+            s['pending_count'] = int(s.get('pending_count') or 0)
             if s.get('profile_image'):
                 s['profile_image'] = s['profile_image'].replace('uploads/', '', 1).lstrip('/')
-        
-        cursor.close()
-        conn.close()
         
         return jsonify({
             'success': True,
@@ -337,7 +364,18 @@ def get_my_students():
         
     except Exception as e:
         print(f"Get students error: {e}")
-        return jsonify({'success': False, 'message': 'Failed to fetch students'}), 500
+        return jsonify({'success': False, 'message': f'Failed to fetch students: {str(e)}'}), 500
+    finally:
+        if cursor:
+            try:
+                cursor.close()
+            except Exception:
+                pass
+        if conn and conn.is_connected():
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 @staff_bp.route('/dashboard-stats', methods=['GET'])
 @role_required('staff')
@@ -350,15 +388,21 @@ def get_staff_stats():
         
         cursor = conn.cursor(dictionary=True)
         uid = session['user_id']
+
+        cursor.execute("SELECT dept_id, academic_year FROM users WHERE user_id = %s", (uid,))
+        staff_info = cursor.fetchone() or {}
+        dept_id = staff_info.get('dept_id')
+        academic_year = staff_info.get('academic_year')
         
         cursor.execute("""
             SELECT
                 (SELECT COUNT(*) FROM outpasses WHERE advisor_id = %s AND advisor_status = 'pending') as pending_count,
-                (SELECT COUNT(*) FROM users WHERE advisor_id = %s AND role = 'student' AND is_active = TRUE) as student_count,
+                (SELECT COUNT(*) FROM users WHERE role = 'student' AND is_active = TRUE
+                 AND (advisor_id = %s OR (%s IS NOT NULL AND dept_id = %s AND (%s IS NULL OR academic_year = %s)))) as student_count,
                 (SELECT COUNT(*) FROM outpasses WHERE advisor_id = %s AND advisor_status != 'pending'
                  AND MONTH(advisor_action_time) = MONTH(CURRENT_DATE())
                  AND YEAR(advisor_action_time) = YEAR(CURRENT_DATE())) as processed_count
-        """, (uid, uid, uid))
+        """, (uid, uid, dept_id, dept_id, academic_year, academic_year, uid))
         
         row = cursor.fetchone() or {}
         
@@ -368,9 +412,9 @@ def get_staff_stats():
         return jsonify({
             'success': True,
             'stats': {
-                'pending_requests': row.get('pending_count') or 0,
-                'total_students': row.get('student_count') or 0,
-                'processed_this_month': row.get('processed_count') or 0
+                'pending_requests': int(row.get('pending_count') or 0),
+                'total_students': int(row.get('student_count') or 0),
+                'processed_this_month': int(row.get('processed_count') or 0)
             }
         }), 200
         
