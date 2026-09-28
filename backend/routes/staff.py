@@ -344,36 +344,18 @@ def get_staff_stats():
             return jsonify({'success': False, 'message': 'Database connection failed'}), 500
         
         cursor = conn.cursor(dictionary=True)
+        uid = session['user_id']
         
-        # Get pending requests count
         cursor.execute("""
-            SELECT COUNT(*) as pending_count
-            FROM outpasses
-            WHERE advisor_id = %s AND advisor_status = 'pending'
-        """, (session['user_id'],))
+            SELECT
+                (SELECT COUNT(*) FROM outpasses WHERE advisor_id = %s AND advisor_status = 'pending') as pending_count,
+                (SELECT COUNT(*) FROM users WHERE advisor_id = %s AND role = 'student' AND is_active = TRUE) as student_count,
+                (SELECT COUNT(*) FROM outpasses WHERE advisor_id = %s AND advisor_status != 'pending'
+                 AND MONTH(advisor_action_time) = MONTH(CURRENT_DATE())
+                 AND YEAR(advisor_action_time) = YEAR(CURRENT_DATE())) as processed_count
+        """, (uid, uid, uid))
         
-        pending = cursor.fetchone()
-        
-        # Get total students
-        cursor.execute("""
-            SELECT COUNT(*) as student_count
-            FROM users
-            WHERE advisor_id = %s AND role = 'student' AND is_active = TRUE
-        """, (session['user_id'],))
-        
-        students = cursor.fetchone()
-        
-        # Get total processed this month
-        cursor.execute("""
-            SELECT COUNT(*) as processed_count
-            FROM outpasses
-            WHERE advisor_id = %s 
-            AND advisor_status != 'pending'
-            AND MONTH(advisor_action_time) = MONTH(CURRENT_DATE())
-            AND YEAR(advisor_action_time) = YEAR(CURRENT_DATE())
-        """, (session['user_id'],))
-        
-        processed = cursor.fetchone()
+        row = cursor.fetchone() or {}
         
         cursor.close()
         conn.close()
@@ -381,9 +363,9 @@ def get_staff_stats():
         return jsonify({
             'success': True,
             'stats': {
-                'pending_requests': pending['pending_count'],
-                'total_students': students['student_count'],
-                'processed_this_month': processed['processed_count']
+                'pending_requests': row.get('pending_count') or 0,
+                'total_students': row.get('student_count') or 0,
+                'processed_this_month': row.get('processed_count') or 0
             }
         }), 200
         

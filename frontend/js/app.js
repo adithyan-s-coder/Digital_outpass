@@ -10,7 +10,9 @@ var app = window.app = {
     formatYear: formatYear,
     getStatusBadge: getStatusBadge,
     showQRModal: showQRModal,
+    showToast: showToast,
     _apiCache: new Map(),
+    _inflightRequests: new Map(),
     clearApiCache: function () {
         if (window.app && window.app._apiCache) {
             window.app._apiCache.clear();
@@ -18,7 +20,46 @@ var app = window.app = {
     }
 };
 
-// Intelligent client-side API caching with auto-invalidation on mutations
+// Non-blocking toast notification helper
+function showToast(message, type = 'info') {
+    if (!message) return;
+    let container = document.getElementById('toastContainer');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'toastContainer';
+        container.className = 'toast-container';
+        document.body.appendChild(container);
+    }
+
+    const icons = {
+        success: 'ph-check-circle',
+        error: 'ph-warning-circle',
+        info: 'ph-info'
+    };
+    const colors = {
+        success: '#10b981',
+        error: '#ef4444',
+        info: '#4f46e5'
+    };
+
+    const toast = document.createElement('div');
+    toast.className = `toast-item toast-${type}`;
+    toast.innerHTML = `
+        <i class="ph ${icons[type] || icons.info}" style="font-size: 1.25rem; color: ${colors[type] || colors.info}; flex-shrink: 0;"></i>
+        <span style="flex: 1; line-height: 1.4;">${message}</span>
+    `;
+    container.appendChild(toast);
+
+    setTimeout(() => {
+        toast.style.transition = 'opacity 0.2s ease, transform 0.2s ease';
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(-8px)';
+        setTimeout(() => toast.remove(), 220);
+    }, 3200);
+}
+window.showToast = showToast;
+
+// Intelligent client-side API caching with request deduplication and auto-invalidation on mutations
 const _nativeFetch = window.fetch;
 window.fetch = async function (resource, init = {}) {
     const method = (init.method || 'GET').toUpperCase();
@@ -30,26 +71,40 @@ window.fetch = async function (resource, init = {}) {
         return _nativeFetch.apply(this, arguments);
     }
 
-    // Cache internal GET requests for up to 15 seconds for instantaneous tab switches
+    // Cache internal GET requests for up to 30 seconds and deduplicate concurrent in-flight requests
     if (url.includes('/api/')) {
         const now = Date.now();
         const cached = app._apiCache.get(url);
-        if (cached && (now - cached.timestamp < 15000)) {
+        if (cached && (now - cached.timestamp < 30000)) {
             return cached.response.clone();
         }
 
-        const resp = await _nativeFetch.apply(this, arguments);
-        if (resp && resp.ok) {
-            try {
-                app._apiCache.set(url, {
-                    timestamp: Date.now(),
-                    response: resp.clone()
-                });
-            } catch (e) {
-                // Ignore clone errors on streamed bodies
-            }
+        if (app._inflightRequests.has(url)) {
+            const sharedResp = await app._inflightRequests.get(url);
+            return sharedResp.clone();
         }
-        return resp;
+
+        const fetchPromise = _nativeFetch.apply(this, arguments).then(resp => {
+            app._inflightRequests.delete(url);
+            if (resp && resp.ok) {
+                try {
+                    app._apiCache.set(url, {
+                        timestamp: Date.now(),
+                        response: resp.clone()
+                    });
+                } catch (e) {
+                    // Ignore clone errors on streamed bodies
+                }
+            }
+            return resp;
+        }).catch(err => {
+            app._inflightRequests.delete(url);
+            throw err;
+        });
+
+        app._inflightRequests.set(url, fetchPromise);
+        const resp = await fetchPromise;
+        return resp.clone();
     }
 
     return _nativeFetch.apply(this, arguments);
@@ -57,6 +112,7 @@ window.fetch = async function (resource, init = {}) {
 
 // Current user data
 let currentUser = null;
+let _departmentsLoaded = false;
 
 // Camera state
 let cameraStream = null;
@@ -65,12 +121,10 @@ let capturedPhotoBlob = null;
 // Immediate fail-safe: Hide splash if something goes catastrophically wrong with script execution
 setTimeout(() => {
     if (typeof hideSplash === 'function') hideSplash();
-}, 12000);
+}, 8000);
 
 // Initialize app
 document.addEventListener('DOMContentLoaded', function () {
-    console.log('DOM Content Loaded - Initializing App');
-    
     try {
         // Check if user is already logged in
         checkSession();
@@ -117,8 +171,6 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 
     if (document.getElementById('registerForm')) {
-        loadDepartments();
-
         // Role change listener
         const regRole = document.getElementById('regRole');
         if (regRole) {
@@ -368,7 +420,7 @@ function hideSplash() {
         // Delay the actual removal to allow for transition
         setTimeout(() => { 
             if (splash) splash.style.display = 'none'; 
-        }, 600);
+        }, 250);
     }
 }
 
@@ -424,7 +476,7 @@ async function handleLogin(e) {
 
     // Set loading state
     loginBtn.disabled = true;
-    loginBtn.innerHTML = '<i class="ph ph-circle-notch ph-spin"></i> Processing...';
+    loginBtn.innerHTML = '<i class="ph ph-circle-notch ph-spin"></i> Signing in...';
 
     try {
         const response = await fetch(`${app.API_BASE}/auth/login`, {
@@ -436,13 +488,11 @@ async function handleLogin(e) {
         const data = await response.json();
 
         if (data.success) {
-            showSuccess(successEl, 'Login successful! Entering workspace...');
             currentUser = data.user;
-            setTimeout(() => {
-                showDashboard();
-                loginBtn.disabled = false;
-                loginBtn.innerHTML = originalBtnText;
-            }, 1500);
+            loginBtn.disabled = false;
+            loginBtn.innerHTML = originalBtnText;
+            showDashboard();
+            showToast(`Welcome back, ${currentUser.full_name || currentUser.username}!`, 'success');
         } else {
             showError(errorEl, data.message);
             loginBtn.disabled = false;
@@ -555,18 +605,17 @@ async function handleRegister(e) {
             body: formData
         });
 
-        console.log('Response status:', response.status);
         const result = await response.json();
-        console.log('Registration result:', result);
 
         if (result.success) {
             showSuccess(successEl, 'Registration successful! Returning to login...');
+            showToast('Registration successful! Please sign in.', 'success');
             setTimeout(() => {
                 hideSuccess(successEl);
                 showLoginPage();
                 regBtn.disabled = false;
                 regBtn.innerHTML = originalBtnText;
-            }, 2000);
+            }, 500);
         } else {
             showError(errorEl, result.message);
             regBtn.disabled = false;
@@ -579,21 +628,25 @@ async function handleRegister(e) {
     }
 }
 
-// Load departments for registration
+// Load departments for registration (lazy-loaded on demand)
 async function loadDepartments() {
+    if (_departmentsLoaded) return;
     try {
-        const response = await fetch(`${app.API_BASE}/admin/departments`);
+        const response = await fetch(`${app.API_BASE}/auth/departments`);
         const data = await response.json();
 
         if (data.success) {
             const select = document.getElementById('regDept');
-            select.innerHTML = '<option value="">Select Department</option>';
-            data.departments.forEach(dept => {
-                const option = document.createElement('option');
-                option.value = dept.dept_id;
-                option.textContent = dept.dept_name;
-                select.appendChild(option);
-            });
+            if (select) {
+                select.innerHTML = '<option value="">Select Department</option>';
+                data.departments.forEach(dept => {
+                    const option = document.createElement('option');
+                    option.value = dept.dept_id;
+                    option.textContent = dept.dept_name;
+                    select.appendChild(option);
+                });
+                _departmentsLoaded = true;
+            }
         }
     } catch (error) {
         console.error('Error loading departments:', error);
@@ -728,18 +781,26 @@ function loadModule(module) {
 
     showModuleLoadingIndicator();
 
-    const hasExistingContent = content.innerHTML.trim().length > 0 && !content.innerHTML.includes('ph-circle-notch');
+    const hasExistingContent = content.innerHTML.trim().length > 0 && !content.innerHTML.includes('skeleton-box');
 
     if (!isClientSide) {
         if (hasExistingContent) {
             // Smooth non-blanking transition: dim slightly and show top progress bar
-            content.style.opacity = '0.65';
+            content.style.opacity = '0.68';
         } else {
-            // First load or empty: show sleek centered spinner
+            // First load or empty: show sleek skeleton shimmer layout
             content.innerHTML = `
-                <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 260px; gap: 12px; animation: fadeIn 0.2s ease-out;">
-                    <i class="ph ph-circle-notch ph-spin" style="font-size: 32px; color: var(--primary);"></i>
-                    <span style="font-size: 14px; font-weight: 500; color: var(--text-muted);">Loading...</span>
+                <div style="display: flex; flex-direction: column; gap: 1.5rem; animation: fadeIn 0.2s ease-out;">
+                    <div>
+                        <div class="skeleton-box" style="width: 240px; height: 32px; margin-bottom: 10px;"></div>
+                        <div class="skeleton-box" style="width: 360px; max-width: 90%; height: 16px;"></div>
+                    </div>
+                    <div class="stats-grid">
+                        <div class="skeleton-box" style="height: 110px;"></div>
+                        <div class="skeleton-box" style="height: 110px;"></div>
+                        <div class="skeleton-box" style="height: 110px;"></div>
+                    </div>
+                    <div class="skeleton-box" style="height: 220px; width: 100%;"></div>
                 </div>
             `;
         }
@@ -748,7 +809,7 @@ function loadModule(module) {
     // Safety timeout: if server takes > 10s, show retry UI instead of hanging forever
     const timeoutId = setTimeout(() => {
         if (currentLoadId === _activeModuleLoadId) {
-            if (content.innerHTML.includes('ph-circle-notch') || content.style.opacity === '0.65') {
+            if (content.innerHTML.includes('skeleton-box') || content.style.opacity === '0.68') {
                 content.innerHTML = `
                     <div class="card" style="padding: 2.5rem; text-align: center;">
                         <i class="ph ph-clock-countdown" style="font-size: 3rem; color: var(--warning); margin-bottom: 1rem;"></i>
@@ -887,6 +948,7 @@ function showLoginPage() {
 function showRegisterPage() {
     hidePage('loginPage');
     showPage('registerPage');
+    loadDepartments();
     document.getElementById('registerForm').reset();
     hideError(document.getElementById('registerError'));
     hideSuccess(document.getElementById('registerSuccess'));

@@ -33,53 +33,32 @@ def login():
         
         cursor = conn.cursor(dictionary=True)
         
-        # Find user by username or email
+        # Find user by username or email (join department and advisor in a single query)
         query = """
-            SELECT u.*, d.dept_name, d.dept_code
+            SELECT u.*, d.dept_name, d.dept_code, adv.full_name AS advisor_name
             FROM users u
             LEFT JOIN departments d ON u.dept_id = d.dept_id
+            LEFT JOIN users adv ON u.advisor_id = adv.user_id
             WHERE (u.username = %s OR u.email = %s) AND u.is_active = TRUE
         """
         cursor.execute(query, (username, username))
         user = cursor.fetchone()
         
+        cursor.close()
+        conn.close()
+
         if not user:
-            cursor.close()
-            conn.close()
             return jsonify({'success': False, 'message': 'Invalid credentials'}), 401
         
         # Verify password
         if not verify_password(password, user['password_hash']):
-            cursor.close()
-            conn.close()
             return jsonify({'success': False, 'message': 'Invalid credentials'}), 401
-        
-        # Create session
-        session.permanent = False
-        session['user_id'] = user['user_id']
-        session['username'] = user['username']
-        session['role'] = user['role']
-        session['full_name'] = user['full_name']
-        session['dept_id'] = user['dept_id']
-        session['email'] = user['email']
         
         # Clean profile image path
         profile_img = user.get('profile_image')
         if profile_img:
             profile_img = profile_img.replace('uploads/', '', 1).lstrip('/')
-        session['profile_image'] = profile_img
-        
-        # Get advisor name for students
-        advisor_name = None
-        if user['role'] == 'student' and user['advisor_id']:
-            cursor.execute("SELECT full_name FROM users WHERE user_id = %s", (user['advisor_id'],))
-            advisor = cursor.fetchone()
-            if advisor:
-                advisor_name = advisor['full_name']
-        
-        cursor.close()
-        conn.close()
-        
+
         # Prepare response data (exclude password hash)
         user_data = {
             'user_id': user['user_id'],
@@ -94,9 +73,22 @@ def login():
             'phone': user.get('phone'),
             'parent_name': user.get('parent_name'),
             'parent_mobile': user.get('parent_mobile'),
-            'profile_image': user.get('profile_image').replace('uploads/', '', 1) if user.get('profile_image') else None,
-            'advisor_name': advisor_name
+            'profile_image': profile_img,
+            'advisor_name': user.get('advisor_name')
         }
+
+        # Create session
+        import time
+        session.permanent = False
+        session['user_id'] = user['user_id']
+        session['username'] = user['username']
+        session['role'] = user['role']
+        session['full_name'] = user['full_name']
+        session['dept_id'] = user['dept_id']
+        session['email'] = user['email']
+        session['profile_image'] = profile_img
+        session['user_data'] = user_data
+        session['last_verified'] = time.time()
         
         return jsonify({
             'success': True,
@@ -114,40 +106,47 @@ def check_session():
     try:
         if 'user_id' not in session:
             return jsonify({'logged_in': False}), 200
+
+        import time
+        now = time.time()
+        # Fast-path: return cached session user_data if verified within last 120 seconds (0 DB queries)
+        if session.get('user_data') and (now - session.get('last_verified', 0)) < 120:
+            return jsonify({
+                'logged_in': True,
+                'user': session['user_data']
+            }), 200
         
         conn = get_db_connection()
         if not conn:
+            # If DB temporarily unreachable but session has user_data, keep session alive smoothly
+            if session.get('user_data'):
+                return jsonify({'logged_in': True, 'user': session['user_data']}), 200
             return jsonify({'logged_in': False, 'error': 'Database connection failed'}), 500
         
         cursor = conn.cursor(dictionary=True)
         
-        # Fetch latest user data
+        # Fetch latest user data + advisor in a single query
         query = """
-            SELECT u.*, d.dept_name, d.dept_code
+            SELECT u.*, d.dept_name, d.dept_code, adv.full_name AS advisor_name
             FROM users u
             LEFT JOIN departments d ON u.dept_id = d.dept_id
+            LEFT JOIN users adv ON u.advisor_id = adv.user_id
             WHERE u.user_id = %s AND u.is_active = TRUE
         """
         cursor.execute(query, (session['user_id'],))
         user = cursor.fetchone()
         
+        cursor.close()
+        conn.close()
+
         if not user:
-            cursor.close()
-            conn.close()
             session.clear() # Clear invalid session
             return jsonify({'logged_in': False}), 200
         
-        # Get advisor name for students
-        advisor_name = None
-        if user['role'] == 'student' and user['advisor_id']:
-            cursor.execute("SELECT full_name FROM users WHERE user_id = %s", (user['advisor_id'],))
-            advisor = cursor.fetchone()
-            if advisor:
-                advisor_name = advisor['full_name']
-        
-        cursor.close()
-        conn.close()
-        
+        profile_img = user.get('profile_image')
+        if profile_img:
+            profile_img = profile_img.replace('uploads/', '', 1).lstrip('/')
+
         user_data = {
             'user_id': user['user_id'],
             'username': user['username'],
@@ -161,9 +160,13 @@ def check_session():
             'phone': user.get('phone'),
             'parent_name': user.get('parent_name'),
             'parent_mobile': user.get('parent_mobile'),
-            'profile_image': user.get('profile_image').replace('uploads/', '', 1) if user.get('profile_image') else None,
-            'advisor_name': advisor_name
+            'profile_image': profile_img,
+            'advisor_name': user.get('advisor_name')
         }
+
+        session['dept_id'] = user['dept_id']
+        session['user_data'] = user_data
+        session['last_verified'] = now
         
         return jsonify({
             'logged_in': True,
@@ -308,16 +311,28 @@ def register():
         # Hash password
         password_hash = hash_password(data['password'])
         
-        # Handle profile image upload
+        # Handle profile image upload (compress & resize for fast page loads)
         profile_image_path = None
         if profile_file and profile_file.filename:
             from backend.config import app, allowed_file
             if allowed_file(profile_file.filename):
-                # Use registration_no if present, otherwise username
                 identifier = data.get('registration_no') or data['username']
-                filename = secure_filename(f"{role}_{identifier}_{profile_file.filename}")
-                upload_path = os.path.join(app.config['UPLOAD_FOLDER'], 'profiles', filename)
-                profile_file.save(upload_path)
+                base_name = os.path.splitext(secure_filename(profile_file.filename))[0]
+                filename = secure_filename(f"{role}_{identifier}_{base_name}.jpg")
+                profiles_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'profiles')
+                os.makedirs(profiles_dir, exist_ok=True)
+                upload_path = os.path.join(profiles_dir, filename)
+                try:
+                    from PIL import Image
+                    profile_file.seek(0)
+                    img = Image.open(profile_file)
+                    if img.mode in ('RGBA', 'P'):
+                        img = img.convert('RGB')
+                    img.thumbnail((800, 800), Image.Resampling.LANCZOS)
+                    img.save(upload_path, format='JPEG', quality=82, optimize=True)
+                except Exception:
+                    profile_file.seek(0)
+                    profile_file.save(upload_path)
                 profile_image_path = f"profiles/{filename}"
         
         # Get database connection

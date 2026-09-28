@@ -484,43 +484,21 @@ def get_security_stats():
         
         cursor = conn.cursor(dictionary=True)
         
-        # Students currently out
         cursor.execute("""
-            SELECT COUNT(*) as students_out
+            SELECT
+                COALESCE(SUM(CASE WHEN actual_exit_time IS NOT NULL AND actual_entry_time IS NULL THEN 1 ELSE 0 END), 0) as students_out,
+                COALESCE(SUM(CASE WHEN DATE(actual_exit_time) = CURDATE() THEN 1 ELSE 0 END), 0) as exits_today,
+                COALESCE(SUM(CASE WHEN DATE(actual_entry_time) = CURDATE() THEN 1 ELSE 0 END), 0) as entries_today,
+                COALESCE(SUM(CASE WHEN actual_exit_time IS NOT NULL 
+                    AND actual_entry_time IS NULL
+                    AND expected_return_time != '23:59:00'
+                    AND (
+                        DATE(out_date) < CURDATE()
+                        OR (DATE(out_date) = CURDATE() AND TIME(expected_return_time) < TIME(NOW()))
+                    ) THEN 1 ELSE 0 END), 0) as overdue_count
             FROM outpasses
-            WHERE actual_exit_time IS NOT NULL AND actual_entry_time IS NULL
         """)
-        currently_out = cursor.fetchone()
-        
-        # Total exits today
-        cursor.execute("""
-            SELECT COUNT(*) as exits_today
-            FROM outpasses
-            WHERE DATE(actual_exit_time) = CURDATE()
-        """)
-        exits_today = cursor.fetchone()
-        
-        # Total entries today
-        cursor.execute("""
-            SELECT COUNT(*) as entries_today
-            FROM outpasses
-            WHERE DATE(actual_entry_time) = CURDATE()
-        """)
-        entries_today = cursor.fetchone()
-        
-        # Overdue students
-        cursor.execute("""
-            SELECT COUNT(*) as overdue_count
-            FROM outpasses
-            WHERE actual_exit_time IS NOT NULL 
-            AND actual_entry_time IS NULL
-            AND expected_return_time != '23:59:00'
-            AND (
-                DATE(out_date) < CURDATE()
-                OR (DATE(out_date) = CURDATE() AND TIME(expected_return_time) < TIME(NOW()))
-            )
-        """)
-        overdue = cursor.fetchone()
+        row = cursor.fetchone() or {}
         
         cursor.close()
         conn.close()
@@ -528,10 +506,10 @@ def get_security_stats():
         return jsonify({
             'success': True,
             'stats': {
-                'students_currently_out': currently_out['students_out'],
-                'exits_today': exits_today['exits_today'],
-                'entries_today': entries_today['entries_today'],
-                'overdue_count': overdue['overdue_count']
+                'students_currently_out': int(row.get('students_out') or 0),
+                'exits_today': int(row.get('exits_today') or 0),
+                'entries_today': int(row.get('entries_today') or 0),
+                'overdue_count': int(row.get('overdue_count') or 0)
             }
         }), 200
         

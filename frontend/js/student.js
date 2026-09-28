@@ -232,10 +232,11 @@ async function handleApplyOutpass(e) {
             successEl.classList.add('show');
             errorEl.classList.remove('show');
             e.target.reset();
+            if (app.showToast) app.showToast(result.message, 'success');
 
             setTimeout(() => {
                 loadModule('my-outpasses');
-            }, 2000);
+            }, 350);
         } else {
             errorEl.textContent = result.message;
             errorEl.classList.add('show');
@@ -255,6 +256,7 @@ async function loadMyOutpasses() {
         const data = await response.json();
 
         if (data.success) {
+            window._studentOutpasses = data.outpasses || [];
             let html = `
                 <div class="mb-8" style="display: flex; justify-content: space-between; align-items: flex-end; animation: fadeIn 0.4s ease-out; flex-wrap: wrap; gap: 1rem;">
                     <div>
@@ -293,7 +295,7 @@ async function loadMyOutpasses() {
             } else {
                 data.outpasses.forEach(outpass => {
                     html += `
-                        <tr style="cursor: pointer; transition: background 0.2s;" onclick="viewOutpassDetails(${outpass.outpass_id})">
+                        <tr style="cursor: pointer; transition: background-color 0.15s;" onclick="viewOutpassDetails(${outpass.outpass_id})">
                             <td>
                                 <div style="font-weight: 800; color: var(--text-main); font-size: 15px;">${app.formatDate(outpass.out_date)}</div>
                                 <div style="font-size: 12px; color: var(--text-muted); font-weight: 600;">DEP: ${app.formatTime(outpass.out_time)}</div>
@@ -307,7 +309,7 @@ async function loadMyOutpasses() {
                             <td>
                                 <div style="display: flex; gap: 8px; justify-content: flex-end;">
                                     ${outpass.final_status === 'approved' && outpass.qr_code ?
-                            `<button onclick="event.stopPropagation(); showQRCode(${outpass.outpass_id})" 
+                            `<button onclick="event.stopPropagation(); showQRCode(${outpass.outpass_id}, '${outpass.qr_code}')" 
                                                  class="btn-modern btn-modern-primary" style="padding: 6px 14px; font-size: 12px; border-radius: 8px;"><i class="ph ph-qr-code"></i></button>` : ''}
                                     ${outpass.final_status === 'pending' ?
                             `<button onclick="event.stopPropagation(); cancelOutpass(${outpass.outpass_id})" 
@@ -406,7 +408,7 @@ async function viewOutpassDetails(outpassId) {
                             ${op.qr_code && op.final_status === 'approved' ? `
                                 <div style="background: white; border: 2px solid #f1f5f9; border-radius: 20px; padding: 32px; text-align: center; box-shadow: var(--shadow-md);">
                                     <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 16px;">Gate Authorization</h3>
-                                    <button onclick="showQRCode(${op.outpass_id})" class="btn-modern btn-modern-primary" style="width: 100%; padding: 16px; border-radius: 12px;">
+                                    <button onclick="showQRCode(${op.outpass_id}, '${op.qr_code}')" class="btn-modern btn-modern-primary" style="width: 100%; padding: 16px; border-radius: 12px;">
                                         <i class="ph ph-qr-code"></i> Display QR Token
                                     </button>
                                     <p style="font-size: 11px; color: var(--text-muted); margin-top: 12px; font-weight: 600;">Show this token to the gate security officer.</p>
@@ -450,9 +452,21 @@ async function viewOutpassDetails(outpassId) {
     }
 }
 
-// Show QR code
-async function showQRCode(outpassId) {
+// Show QR code immediately from memory when available
+async function showQRCode(outpassId, qrTokenDirect) {
     try {
+        let token = qrTokenDirect;
+        if (!token && Array.isArray(window._studentOutpasses)) {
+            const found = window._studentOutpasses.find(o => o.outpass_id === outpassId);
+            if (found && found.qr_code) token = found.qr_code;
+        }
+
+        if (token) {
+            const qrBase64 = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(token)}`;
+            app.showQRModal(token, qrBase64);
+            return;
+        }
+
         const response = await fetch(`${app.API_BASE}/student/outpass/${outpassId}`);
         const data = await response.json();
 
@@ -472,10 +486,11 @@ async function cancelOutpass(outpassId) {
     try {
         const response = await fetch(`${app.API_BASE}/student/cancel-outpass/${outpassId}`, { method: 'POST' });
         const data = await response.json();
-        alert(data.message);
+        app.showToast(data.message, data.success ? 'success' : 'error');
         loadMyOutpasses();
     } catch (error) {
         console.error('Error cancelling outpass:', error);
+        app.showToast('Error cancelling outpass', 'error');
     }
 }
 
@@ -486,10 +501,11 @@ async function deleteOutpass(outpassId) {
     try {
         const response = await fetch(`${app.API_BASE}/student/delete-outpass/${outpassId}`, { method: 'DELETE' });
         const data = await response.json();
-        alert(data.message);
+        app.showToast(data.message, data.success ? 'success' : 'error');
         loadMyOutpasses();
     } catch (error) {
         console.error('Error deleting outpass:', error);
+        app.showToast('Error archiving outpass', 'error');
     }
 }
 

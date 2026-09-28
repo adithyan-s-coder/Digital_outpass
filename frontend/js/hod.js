@@ -77,6 +77,7 @@ async function loadHODApprovals() {
         const data = await response.json();
 
         if (data.success) {
+            window._hodPendingRequests = data.requests || [];
             let html = `
                 <div class="mb-8" style="display: flex; justify-content: space-between; align-items: flex-end; animation: fadeIn 0.4s ease-out; flex-wrap: wrap; gap: 1rem;">
                     <div>
@@ -105,7 +106,7 @@ async function loadHODApprovals() {
             if (data.requests.length === 0) {
                 html += `
                     <tr>
-                        <td colspan="5" style="text-align: center; padding: 80px; color: var(--text-muted);">
+                        <td colspan="6" style="text-align: center; padding: 80px; color: var(--text-muted);">
                             <i class="ph ph-checks" style="font-size: 64px; opacity: 0.1; display: block; margin: 0 auto 16px;"></i>
                             All caught up! No pending final approvals.
                         </td>
@@ -114,7 +115,7 @@ async function loadHODApprovals() {
             } else {
                 data.requests.forEach(req => {
                     html += `
-                        <tr style="transition: background 0.2s linear;">
+                        <tr style="transition: background-color 0.15s linear;">
                             <td>
                                 <div style="display: flex; align-items: center; gap: 12px;">
                                     <div style="width: 40px; height: 40px; border-radius: 12px; background: rgba(5, 150, 105, 0.05); color: var(--primary); display: flex; align-items: center; justify-content: center; font-weight: 700;">
@@ -183,16 +184,26 @@ async function loadHODApprovals() {
 
 async function reviewHODRequest(outpassId) {
     try {
-        const response = await fetch(`${app.API_BASE}/hod/pending-approvals`);
-        const data = await response.json();
-        const op = data.requests.find(r => r.outpass_id === outpassId);
+        let op = Array.isArray(window._hodPendingRequests)
+            ? window._hodPendingRequests.find(r => r.outpass_id === outpassId)
+            : null;
+        if (!op && Array.isArray(window._hodAllOutpasses)) {
+            op = window._hodAllOutpasses.find(r => r.outpass_id === outpassId);
+        }
+
+        if (!op) {
+            const response = await fetch(`${app.API_BASE}/hod/pending-approvals`);
+            const data = await response.json();
+            window._hodPendingRequests = data.requests || [];
+            op = window._hodPendingRequests.find(r => r.outpass_id === outpassId);
+        }
 
         if (op) {
             document.getElementById('moduleContent').innerHTML = `
                 <div class="glass-panel" style="max-width: 850px; margin: 0 auto; border: none;">
                     <div style="display: flex; gap: 40px; align-items: start; margin-bottom: 40px; border-bottom: 1px solid #f1f5f9; padding-bottom: 32px;">
                         <div style="width: 160px; height: 160px; border-radius: 24px; background: #f8fafc; overflow: hidden; display: flex; align-items: center; justify-content: center; border: 3px solid #f1f5f9; box-shadow: var(--shadow-md);">
-                            ${op.profile_image ? `<img src="/uploads/${op.profile_image}" style="width: 100%; height: 100%; object-fit: cover;" onerror="this.style.display='none'">` : '<i class="ph ph-user-circle" style="font-size: 80px; color: #cbd5e1;"></i>'}
+                            ${op.profile_image ? `<img src="/uploads/${op.profile_image}" loading="lazy" decoding="async" style="width: 100%; height: 100%; object-fit: cover;" onerror="this.style.display='none'">` : '<i class="ph ph-user-circle" style="font-size: 80px; color: #cbd5e1;"></i>'}
                         </div>
                         <div style="flex: 1;">
                             <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px;">
@@ -274,10 +285,10 @@ async function approveHODFinal(outpassId) {
             body: JSON.stringify({ remarks })
         });
         const data = await response.json();
-        alert(data.message);
+        app.showToast(data.message, data.success ? 'success' : 'error');
         loadModule('hod-approvals');
     } catch (error) {
-        alert('Error communicating with authority server.');
+        app.showToast('Error communicating with authority server.', 'error');
     }
 }
 
@@ -285,7 +296,7 @@ async function rejectHODFinal(outpassId) {
     const remarks = document.getElementById('hodRemarks').value;
 
     if (!remarks) {
-        alert('Please provide formal remarks for rejection.');
+        app.showToast('Please provide formal remarks for rejection.', 'error');
         return;
     }
 
@@ -298,10 +309,10 @@ async function rejectHODFinal(outpassId) {
             body: JSON.stringify({ remarks })
         });
         const data = await response.json();
-        alert(data.message);
+        app.showToast(data.message, data.success ? 'success' : 'error');
         loadModule('hod-approvals');
     } catch (error) {
-        alert('Error communicating with authority server.');
+        app.showToast('Error communicating with authority server.', 'error');
     }
 }
 
@@ -402,6 +413,7 @@ async function loadAllOutpasses() {
         const data = await response.json();
 
         if (data.success) {
+            window._hodAllOutpasses = data.outpasses || [];
             let html = `
                 <div style="margin-bottom: 40px; display: flex; justify-content: space-between; align-items: flex-end; animation: fadeIn 0.4s ease-out;">
                     <div>
@@ -437,7 +449,7 @@ async function loadAllOutpasses() {
             if (data.outpasses.length === 0) {
                 html += `
                     <tr>
-                        <td colspan="5" style="text-align: center; padding: 80px; color: var(--text-muted);">
+                        <td colspan="6" style="text-align: center; padding: 80px; color: var(--text-muted);">
                             <i class="ph ph-folder-not-found" style="font-size: 64px; opacity: 0.1; display: block; margin: 0 auto 16px;"></i>
                             No departmental audit records found.
                         </td>
@@ -446,11 +458,11 @@ async function loadAllOutpasses() {
             } else {
                 data.outpasses.forEach(op => {
                     html += `
-                        <tr style="cursor: pointer; transition: background 0.2s;" onclick="reviewHODRequest(${op.outpass_id})">
+                        <tr style="cursor: pointer; transition: background-color 0.15s;" onclick="reviewHODRequest(${op.outpass_id})">
                             <td>
                                 <div style="display: flex; align-items: center; gap: 14px;">
                                     <div style="width: 44px; height: 44px; border-radius: 12px; background: #eef2ff; color: var(--primary); display: flex; align-items: center; justify-content: center;">
-                                        <i class="ph ph-student-bold" style="font-size: 20px;"></i>
+                                        <i class="ph ph-student" style="font-size: 20px;"></i>
                                     </div>
                                     <div>
                                         <div style="font-weight: 700; color: var(--text-main); font-size: 15px;">${op.student_name}</div>

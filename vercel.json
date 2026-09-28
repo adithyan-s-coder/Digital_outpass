@@ -1,0 +1,38 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "frontend/**",
+      "use": "@vercel/static"
+    },
+    {
+      "src": "app.py",
+      "use": "@vercel/python"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "/app.py"
+    },
+    {
+      "src": "/uploads/(.*)",
+      "dest": "/app.py"
+    },
+    {
+      "src": "/(css|js|assets)/(.*)",
+      "headers": {
+        "Cache-Control": "public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800"
+      },
+      "dest": "/frontend/$1/$2"
+    },
+    {
+      "src": "/(manifest\\.json|sw\\.js)",
+      "dest": "/frontend/$1"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/frontend/index.html"
+    }
+  ]
+}

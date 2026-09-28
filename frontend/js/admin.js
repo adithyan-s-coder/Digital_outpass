@@ -100,7 +100,7 @@ async function loadManageUsers() {
                 <div class="glass-panel" style="background: white; border: none; display: flex; align-items: center; gap: 1.25rem; flex-wrap: wrap; margin-bottom: 1.5rem;">
                     <div style="flex: 1; min-width: 250px; position: relative;">
                         <i class="ph ph-magnifying-glass" style="position: absolute; left: 0.75rem; top: 0.75rem; color: var(--text-muted);"></i>
-                        <input type="text" placeholder="Search users by name or email..." style="width: 100%; padding: 0.625rem 0.625rem 0.625rem 2.5rem; border-radius: 0.5rem; border: 1px solid #e2e8f0;" onkeyup="searchUsers(this.value)">
+                        <input type="text" placeholder="Search users by name or email..." style="width: 100%; padding: 0.625rem 0.625rem 0.625rem 2.5rem; border-radius: 0.5rem; border: 1px solid #e2e8f0;" oninput="searchUsers(this.value)">
                     </div>
                     <div>
                         <select id="roleFilter" onchange="filterUsersByRole(this.value)" style="padding: 0.625rem; border-radius: 0.5rem; border: 1px solid #e2e8f0; min-width: 150px; width: 100%;">
@@ -318,13 +318,13 @@ async function handleAddUser(e) {
         });
 
         const result = await response.json();
-        alert(result.message);
+        app.showToast(result.message, result.success ? 'success' : 'error');
 
         if (result.success) {
             loadModule('manage-users');
         }
     } catch (error) {
-        alert('Error adding user');
+        app.showToast('Error adding user', 'error');
     }
 }
 
@@ -332,7 +332,7 @@ async function resetUserPassword(userId) {
     const newPassword = prompt('Enter new password (min 6 characters):');
 
     if (!newPassword || newPassword.length < 6) {
-        alert('Password must be at least 6 characters');
+        if (newPassword !== null) app.showToast('Password must be at least 6 characters', 'error');
         return;
     }
 
@@ -344,9 +344,9 @@ async function resetUserPassword(userId) {
         });
 
         const data = await response.json();
-        alert(data.message);
+        app.showToast(data.message, data.success ? 'success' : 'error');
     } catch (error) {
-        alert('Error resetting password');
+        app.showToast('Error resetting password', 'error');
     }
 }
 
@@ -359,13 +359,13 @@ async function deactivateUser(userId) {
         });
 
         const data = await response.json();
-        alert(data.message);
+        app.showToast(data.message, data.success ? 'success' : 'error');
 
         if (data.success) {
             loadModule('manage-users');
         }
     } catch (error) {
-        alert('Error deactivating user');
+        app.showToast('Error deactivating user', 'error');
     }
 }
 
@@ -380,13 +380,13 @@ async function activateUser(userId) {
         });
 
         const data = await response.json();
-        alert(data.message);
+        app.showToast(data.message, data.success ? 'success' : 'error');
 
         if (data.success) {
             loadModule('manage-users');
         }
     } catch (error) {
-        alert('Error activating user');
+        app.showToast('Error activating user', 'error');
     }
 }
 
@@ -400,13 +400,13 @@ async function hardDeleteUser(userId) {
         });
 
         const data = await response.json();
-        alert(data.message);
+        app.showToast(data.message, data.success ? 'success' : 'error');
 
         if (data.success) {
             loadModule('manage-users');
         }
     } catch (error) {
-        alert('Error performing permanent delete');
+        app.showToast('Error performing permanent delete', 'error');
     }
 }
 
@@ -422,7 +422,7 @@ async function editUser(userId) {
         const deptsData = await deptsRes.json();
 
         const user = usersData.users.find(u => u.user_id == userId);
-        if (!user) return alert('User not found');
+        if (!user) return app.showToast('User not found', 'error');
 
         const deptOptions = deptsData.departments.map(d =>
             `<option value="${d.dept_id}" ${d.dept_id == user.dept_id ? 'selected' : ''}>${d.dept_name}</option>`
@@ -482,7 +482,7 @@ async function editUser(userId) {
         document.getElementById('editUserForm').addEventListener('submit', handleUpdateUser);
     } catch (error) {
         console.error('Error loading edit form:', error);
-        alert('Error loading user data');
+        app.showToast('Error loading user data', 'error');
     }
 }
 
@@ -507,13 +507,13 @@ async function handleUpdateUser(e) {
         });
 
         const result = await response.json();
-        alert(result.message);
+        app.showToast(result.message, result.success ? 'success' : 'error');
 
         if (result.success) {
             loadModule('manage-users');
         }
     } catch (error) {
-        alert('Error updating user');
+        app.showToast('Error updating user', 'error');
     }
 }
 
@@ -537,7 +537,7 @@ async function loadManageDepartments() {
                 <div class="glass-panel" style="background: white; border: none; margin-bottom: 1.5rem;">
                     <div style="position: relative;">
                         <i class="ph ph-magnifying-glass" style="position: absolute; left: 0.75rem; top: 0.75rem; color: var(--text-muted);"></i>
-                        <input type="text" placeholder="Search departments..." style="width: 100%; padding: 0.625rem 0.625rem 0.625rem 2.5rem; border-radius: 0.5rem; border: 1px solid #e2e8f0;" onkeyup="searchDepartments(this.value)">
+                        <input type="text" placeholder="Search departments..." style="width: 100%; padding: 0.625rem 0.625rem 0.625rem 2.5rem; border-radius: 0.5rem; border: 1px solid #e2e8f0;" oninput="searchDepartments(this.value)">
                     </div>
                 </div>
                 
@@ -637,13 +637,13 @@ async function handleAddDept(e) {
         });
 
         const result = await response.json();
-        alert(result.message);
+        app.showToast(result.message, result.success ? 'success' : 'error');
 
         if (result.success) {
             loadModule('manage-departments');
         }
     } catch (error) {
-        alert('Error adding department');
+        app.showToast('Error adding department', 'error');
     }
 }
 
@@ -653,7 +653,7 @@ async function editDepartment(deptId) {
         const data = await response.json();
 
         const dept = data.departments.find(d => d.dept_id == deptId);
-        if (!dept) return alert('Department not found');
+        if (!dept) return app.showToast('Department not found', 'error');
 
         document.getElementById('moduleContent').innerHTML = `
             <div class="card">
@@ -676,7 +676,7 @@ async function editDepartment(deptId) {
 
         document.getElementById('editDeptForm').addEventListener('submit', handleUpdateDept);
     } catch (error) {
-        alert('Error loading department data');
+        app.showToast('Error loading department data', 'error');
     }
 }
 
@@ -695,13 +695,13 @@ async function handleUpdateDept(e) {
         });
 
         const result = await response.json();
-        alert(result.message);
+        app.showToast(result.message, result.success ? 'success' : 'error');
 
         if (result.success) {
             loadModule('manage-departments');
         }
     } catch (error) {
-        alert('Error updating department');
+        app.showToast('Error updating department', 'error');
     }
 }
 
@@ -804,18 +804,19 @@ async function exportReport() {
 
         if (data.success) {
             if (!data.data || data.data.length === 0) {
-                alert('No data found for the selected period');
+                app.showToast('No data found for the selected period', 'info');
                 return;
             }
             // Convert to CSV
             const csv = convertToCSV(data.data);
             downloadCSV(csv, 'outpass_report.csv');
+            app.showToast('CSV report downloaded', 'success');
         } else {
-            alert('Error: ' + (data.message || 'Failed to export report'));
+            app.showToast('Error: ' + (data.message || 'Failed to export report'), 'error');
         }
     } catch (error) {
         console.error('Export error:', error);
-        alert('Error exporting report');
+        app.showToast('Error exporting report', 'error');
     }
 }
 
@@ -849,12 +850,16 @@ function downloadCSV(csv, filename) {
     a.click();
 }
 
+let _deptSearchRaf = null;
 function searchDepartments(query) {
-    const rows = document.querySelectorAll('#deptsTable tbody tr');
-    const q = query.toLowerCase();
-    rows.forEach(row => {
-        const text = row.textContent.toLowerCase();
-        row.style.display = text.includes(q) ? '' : 'none';
+    if (_deptSearchRaf) cancelAnimationFrame(_deptSearchRaf);
+    _deptSearchRaf = requestAnimationFrame(() => {
+        const rows = document.querySelectorAll('#deptsTable tbody tr');
+        const q = query.toLowerCase();
+        rows.forEach(row => {
+            const text = row.textContent.toLowerCase();
+            row.style.display = text.includes(q) ? '' : 'none';
+        });
     });
 }
 
@@ -867,21 +872,25 @@ async function deleteDepartment(deptId) {
         });
 
         const data = await response.json();
-        alert(data.message);
+        app.showToast(data.message, data.success ? 'success' : 'error');
 
         if (data.success) {
             loadModule('manage-departments');
         }
     } catch (error) {
-        alert('Error deleting department');
+        app.showToast('Error deleting department', 'error');
     }
 }
 
+let _userSearchRaf = null;
 function searchUsers(query) {
-    const rows = document.querySelectorAll('#usersTable tbody tr');
-    const q = query.toLowerCase();
-    rows.forEach(row => {
-        const text = row.textContent.toLowerCase();
-        row.style.display = text.includes(q) ? '' : 'none';
+    if (_userSearchRaf) cancelAnimationFrame(_userSearchRaf);
+    _userSearchRaf = requestAnimationFrame(() => {
+        const rows = document.querySelectorAll('#usersTable tbody tr');
+        const q = query.toLowerCase();
+        rows.forEach(row => {
+            const text = row.textContent.toLowerCase();
+            row.style.display = text.includes(q) ? '' : 'none';
+        });
     });
 }

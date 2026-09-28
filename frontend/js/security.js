@@ -66,7 +66,28 @@ async function loadSecurityDashboard() {
     }
 }
 
+let _qrScriptPromise = null;
+function ensureQrScannerLoaded() {
+    if (typeof Html5Qrcode !== 'undefined') return Promise.resolve();
+    if (_qrScriptPromise) return _qrScriptPromise;
+    _qrScriptPromise = new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = 'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js';
+        script.async = true;
+        script.onload = () => resolve();
+        script.onerror = () => {
+            _qrScriptPromise = null;
+            reject(new Error('Failed to load QR scanner library'));
+        };
+        document.head.appendChild(script);
+    });
+    return _qrScriptPromise;
+}
+
 async function loadScanQR() {
+    // Preload QR scanner script in the background when Scan Pass tab opens
+    ensureQrScannerLoaded().catch(() => {});
+
     document.getElementById('moduleContent').innerHTML = `
         <div class="glass-panel" style="background: white; border: none; max-width: 600px; margin: 0 auto; text-align: center;">
             <div class="mb-8">
@@ -116,7 +137,7 @@ async function loadScanQR() {
                 }
             });
         }
-    }, 100);
+    }, 50);
 }
 
 let html5QrCode = null;
@@ -130,11 +151,12 @@ async function startScanner() {
     startBtn.style.display = 'none';
     stopBtn.style.display = 'inline-block';
 
-    html5QrCode = new Html5Qrcode("qr-reader");
-
-    const config = { fps: 10, qrbox: { width: 250, height: 250 } };
-
     try {
+        await ensureQrScannerLoaded();
+        html5QrCode = new Html5Qrcode("qr-reader");
+
+        const config = { fps: 10, qrbox: { width: 250, height: 250 } };
+
         const cameras = await Html5Qrcode.getCameras();
         if (cameras && cameras.length > 0) {
             // Priority: Try to find a back camera, otherwise use the first one
@@ -145,8 +167,6 @@ async function startScanner() {
                 c.label.toLowerCase().includes('environment')
             );
             if (backCamera) cameraId = backCamera.id;
-
-            console.log('Starting camera with ID:', cameraId);
 
             try {
                 await html5QrCode.start(
@@ -161,9 +181,8 @@ async function startScanner() {
                 );
             } catch (innerErr) {
                 console.warn('Manual ID start failed, trying generic start:', innerErr);
-                // Last ditch effort: Let the library choose
                 await html5QrCode.start(
-                    { facingMode: "user" }, // Use "user" as a fallback for laptops
+                    { facingMode: "user" },
                     config,
                     (decodedText) => {
                         document.getElementById('qrInput').value = decodedText;
@@ -178,7 +197,7 @@ async function startScanner() {
         }
     } catch (err) {
         console.error('Final Scanner failure:', err);
-        alert('CAMERA ACCESS ERROR\n\n1. Check if another app (Zoom, Teams, etc.) is using your camera.\n2. Ensure you have clicked "Allow" in the browser popup.\n3. Try refreshing the page (F5).\n\nDetails: ' + err.message);
+        app.showToast('Camera access error: ' + err.message, 'error');
         readerDiv.style.display = 'none';
         startBtn.style.display = 'inline-block';
         stopBtn.style.display = 'none';
@@ -232,7 +251,7 @@ async function verifyQRCodeFromScan(qrCode) {
                     
                     <div class="scan-profile-container">
                         ${data.student.profile_image ?
-                    `<img src="/uploads/${data.student.profile_image}" class="scan-profile-img" onerror="this.src='https://ui-avatars.com/api/?name=${encodeURIComponent(data.student.name)}&background=random'">` :
+                    `<img src="/uploads/${data.student.profile_image}" loading="lazy" decoding="async" class="scan-profile-img" onerror="this.src='https://ui-avatars.com/api/?name=${encodeURIComponent(data.student.name)}&background=random'">` :
                     `<div class="scan-profile-placeholder"><i class="ph ph-user"></i></div>`
                 }
                     </div>
@@ -293,6 +312,7 @@ async function recordExit(qrCode) {
         const data = await response.json();
 
         if (data.success) {
+            app.showToast(`Exit recorded for ${data.student.name}`, 'success');
             document.getElementById('qrResult').innerHTML = `
                 <div class="success-message show" style="padding: 32px; border-radius: 12px; background: #ecfdf5;">
                     <div style="font-size: 48px; color: var(--success); margin-bottom: 16px;">✓</div>
@@ -300,7 +320,7 @@ async function recordExit(qrCode) {
                     
                     <div class="scan-profile-container" style="width: 80px; height: 80px;">
                          ${data.student.profile_image ?
-                    `<img src="/uploads/${data.student.profile_image}" class="scan-profile-img" onerror="this.src='https://ui-avatars.com/api/?name=${encodeURIComponent(data.student.name)}&background=random'">` :
+                    `<img src="/uploads/${data.student.profile_image}" loading="lazy" decoding="async" class="scan-profile-img" onerror="this.src='https://ui-avatars.com/api/?name=${encodeURIComponent(data.student.name)}&background=random'">` :
                     `<div class="scan-profile-placeholder"><i class="ph ph-user"></i></div>`
                 }
                     </div>
@@ -316,7 +336,7 @@ async function recordExit(qrCode) {
             document.getElementById('qrResult').innerHTML = `<div class="error-message show">${data.message}</div>`;
         }
     } catch (error) {
-        alert('Error recording exit');
+        app.showToast('Error recording exit', 'error');
     }
 }
 
@@ -422,16 +442,16 @@ async function recordEntryManual(outpassId) {
         
         if (data.success) {
             if (data.is_late) {
-               alert('Entry recorded successfully (LATE) ⏰');
+                app.showToast('Entry recorded (LATE) ⏰', 'info');
             } else {
-               alert(data.message);
+                app.showToast(data.message, 'success');
             }
             loadModule('students-out');
         } else {
-            alert(data.message);
+            app.showToast(data.message, 'error');
         }
     } catch (error) {
-        alert('Error recording entry');
+        app.showToast('Error recording entry', 'error');
     }
 }
 

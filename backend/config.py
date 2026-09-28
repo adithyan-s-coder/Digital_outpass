@@ -25,8 +25,9 @@ app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=2)
 
 # ================= DATABASE CONNECTION & POOLING =================
 
+import time
 import threading
-from mysql.connector import pooling
+from collections import deque
 
 try:
     import certifi
@@ -34,9 +35,13 @@ try:
 except ImportError:
     DEFAULT_CA_PATH = None
 
-_db_pool = None
 _pool_lock = threading.Lock()
 _working_config = None
+_idle_connections = deque()
+_MAX_IDLE_CONNECTIONS = 5
+_conn_last_used = {}
+_PING_INTERVAL_SECONDS = 45.0
+
 
 def get_db_connection_params():
     """Extract database connection parameters from URL or discrete environment variables."""
@@ -80,12 +85,22 @@ def get_db_connection_params():
     }
 
 
-def find_working_config(params):
-    """Probes candidate connection configurations once and caches the working one."""
+def _open_new_connection():
+    """Opens a single MySQL connection, probing and caching the working SSL config on first call."""
     global _working_config
-    if _working_config is not None:
-        return _working_config
 
+    if _working_config is not None:
+        conn = mysql.connector.connect(**_working_config)
+        try:
+            c = conn.cursor()
+            c.execute("SET time_zone = '+05:30'")
+            c.close()
+        except Exception:
+            pass
+        _conn_last_used[id(conn)] = time.monotonic()
+        return conn
+
+    params = get_db_connection_params()
     is_local = params['host'] in ('localhost', '127.0.0.1')
 
     ssl_disabled_env = os.environ.get("DB_SSL_DISABLED", "").strip().lower()
@@ -143,116 +158,134 @@ def find_working_config(params):
     last_err = None
     for config in conn_configs:
         try:
-            test_conn = mysql.connector.connect(**config)
-            if test_conn.is_connected():
+            conn = mysql.connector.connect(**config)
+            if conn.is_connected():
                 try:
-                    c = test_conn.cursor()
+                    c = conn.cursor()
                     c.execute("SET time_zone = '+05:30'")
                     c.close()
                 except Exception:
                     pass
-                test_conn.close()
                 _working_config = dict(config)
-                print(f"[OK] Database connection verified (ssl_disabled={config.get('ssl_disabled', False)})")
-                return _working_config
+                _conn_last_used[id(conn)] = time.monotonic()
+                print(f"[OK] Database connection established (ssl_disabled={config.get('ssl_disabled', False)})")
+                # Reuse this open connection directly instead of closing & opening 10 more!
+                return conn
         except Exception as err:
             last_err = err
 
-    print(f"[ERROR] Database probe failed for {params['user']}@{params['host']}:{params['port']}/{params['database']}: {last_err}")
+    print(f"[ERROR] Database connection failed for {params['user']}@{params['host']}:{params['port']}/{params['database']}: {last_err}")
     return None
 
 
-def get_db_pool():
-    """Initializes or retrieves the persistent connection pool."""
-    global _db_pool, _working_config
-    if _db_pool is not None:
-        return _db_pool
-
-    with _pool_lock:
-        if _db_pool is not None:
-            return _db_pool
-
-        params = get_db_connection_params()
-        working_cfg = find_working_config(params)
-        if not working_cfg:
-            return None
+def _checkout_connection():
+    """Checks out a warm connection from the lazy pool or opens a single new one on demand."""
+    now = time.monotonic()
+    while True:
+        with _pool_lock:
+            if not _idle_connections:
+                break
+            conn = _idle_connections.pop()
 
         try:
-            pool_config = dict(working_cfg)
-            pool_config['pool_name'] = "outpass_pool"
-            pool_config['pool_size'] = 10
-            # TiDB does not support COM_RESET_CONNECTION; must be False for seamless pooling
-            pool_config['pool_reset_session'] = False
-            _db_pool = pooling.MySQLConnectionPool(**pool_config)
-            print("[OK] Initialized persistent MySQL connection pool (size=10, reset_session=False)")
-            return _db_pool
-        except Exception as e:
-            print(f"[WARN] Connection pool initialization failed, will use direct connections: {e}")
-            return None
-
-
-def _create_raw_connection():
-    """Internal helper to acquire a connection from pool or direct connect."""
-    pool = get_db_pool()
-    if pool:
-        try:
-            conn = pool.get_connection()
-            if conn:
-                try:
-                    conn.ping(reconnect=True, attempts=2, delay=0.5)
-                except Exception:
-                    try:
-                        conn.close()
-                    except Exception:
-                        pass
-                    conn = None
-            if conn and conn.is_connected():
-                return conn
-        except Exception as pool_err:
-            print(f"[WARN] Pool checkout warning: {pool_err}")
-
-    # Fallback to direct connection using cached working config
-    cfg = _working_config
-    if not cfg:
-        params = get_db_connection_params()
-        cfg = find_working_config(params)
-
-    if cfg:
-        try:
-            conn = mysql.connector.connect(**cfg)
+            conn_id = id(conn)
+            last_used = _conn_last_used.get(conn_id, 0.0)
+            if (now - last_used) > _PING_INTERVAL_SECONDS:
+                conn.ping(reconnect=True, attempts=1, delay=0.1)
             if conn.is_connected():
+                _conn_last_used[conn_id] = now
                 return conn
-        except Exception as dir_err:
-            print(f"[ERROR] Direct database connection failed: {dir_err}")
+        except Exception:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
-    return None
+    try:
+        return _open_new_connection()
+    except Exception as e:
+        print(f"[ERROR] Failed to open database connection: {e}")
+        return None
+
+
+class _PooledConnectionProxy:
+    """Lightweight proxy so conn.close() in route handlers returns the connection to the lazy pool."""
+    __slots__ = ('_conn', '_returned')
+
+    def __init__(self, conn):
+        self._conn = conn
+        self._returned = False
+
+    def cursor(self, *args, **kwargs):
+        return self._conn.cursor(*args, **kwargs)
+
+    def commit(self):
+        return self._conn.commit()
+
+    def rollback(self):
+        return self._conn.rollback()
+
+    def is_connected(self):
+        return self._conn is not None and self._conn.is_connected()
+
+    def ping(self, *args, **kwargs):
+        return self._conn.ping(*args, **kwargs)
+
+    def close(self):
+        if self._returned or self._conn is None:
+            return
+        self._returned = True
+        raw = self._conn
+        try:
+            if raw.is_connected():
+                _conn_last_used[id(raw)] = time.monotonic()
+                with _pool_lock:
+                    if len(_idle_connections) < _MAX_IDLE_CONNECTIONS:
+                        _idle_connections.append(raw)
+                        return
+            raw.close()
+        except Exception:
+            try:
+                raw.close()
+            except Exception:
+                pass
 
 
 def get_db_connection():
-    """Returns an active database connection from persistent pool (or direct fallback)."""
-    conn = _create_raw_connection()
-    if conn and has_request_context():
-        g.db_conn = conn
-    return conn
+    """Returns an active database connection from the lazy pool."""
+    if has_request_context():
+        existing = getattr(g, 'db_conn', None)
+        if existing is not None and not existing._returned:
+            try:
+                if existing.is_connected():
+                    return existing
+            except Exception:
+                pass
+    raw_conn = _checkout_connection()
+    if not raw_conn:
+        return None
+    proxy = _PooledConnectionProxy(raw_conn)
+    if has_request_context():
+        g.db_conn = proxy
+    return proxy
 
 
 @app.teardown_appcontext
 def close_db_connection(exception=None):
-    """Guarantees returned connections are closed/released at end of request."""
+    """Guarantees checked-out connections are returned to the lazy pool at end of request."""
     if has_request_context():
         conn = g.pop('db_conn', None)
         if conn is not None:
             try:
-                if conn.is_connected():
-                    conn.close()
+                conn.close()
             except Exception:
                 pass
 
 
 # ================= INIT DB FUNCTION =================
 
-def init_db():
-    """Initializes schema and sample data safely."""
+def init_db(force=False):
+    """Initializes schema and sample data safely, with a fast-path check if already initialized."""
     conn = get_db_connection()
     if not conn:
         print("[ERROR] Cannot initialize DB: Connection failed")
@@ -263,6 +296,24 @@ def init_db():
 
     try:
         cursor = conn.cursor()
+
+        # Fast-path check: If tables, migrated columns, and users already exist, skip 15+ DDL round-trips
+        if not force:
+            try:
+                cursor.execute("SELECT COUNT(*) FROM users")
+                existing_users = cursor.fetchone()[0]
+                cursor.execute("SELECT academic_year FROM users LIMIT 1")
+                cursor.fetchall()
+                cursor.execute("SELECT actual_exit_time FROM outpasses LIMIT 1")
+                cursor.fetchall()
+                if existing_users > 0:
+                    cursor.close()
+                    conn.close()
+                    print("[OK] Database schema already initialized (fast-path verified)")
+                    return True
+            except Exception:
+                # Schema or columns missing, proceed with full initialization
+                pass
         
         # Execute Schema
         if os.path.exists(schema_path):
@@ -331,10 +382,22 @@ def init_db():
             conn.close()
         return False
 
-# File Handling
-UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
+# File Handling (supports read-only serverless filesystems like Vercel via /tmp/uploads)
+DEFAULT_UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
+if os.environ.get('VERCEL'):
+    UPLOAD_FOLDER = '/tmp/uploads'
+else:
+    UPLOAD_FOLDER = DEFAULT_UPLOAD_FOLDER
+
+try:
+    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+except OSError:
+    import tempfile
+    UPLOAD_FOLDER = os.path.join(tempfile.gettempdir(), 'uploads')
+    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+app.config['DEFAULT_UPLOAD_FOLDER'] = DEFAULT_UPLOAD_FOLDER
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in {'png', 'jpg', 'jpeg', 'pdf'}

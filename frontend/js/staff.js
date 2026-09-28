@@ -72,6 +72,7 @@ async function loadPendingRequests() {
         const data = await response.json();
 
         if (data.success) {
+            window._staffPendingRequests = data.requests || [];
             let html = `
                 <div class="mb-8" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
                     <h2 class="login-title" style="font-size: 1.75rem;">Pending Requests</h2>
@@ -99,7 +100,7 @@ async function loadPendingRequests() {
             `;
 
             if (data.requests.length === 0) {
-                html += `<tr><td colspan="7" style="text-align: center; padding: 20px;">No pending requests.</td></tr>`;
+                html += `<tr><td colspan="8" style="text-align: center; padding: 20px;">No pending requests.</td></tr>`;
             } else {
                 data.requests.forEach(req => {
                     const parentInfo = req.parent_name
@@ -160,9 +161,16 @@ async function loadPendingRequests() {
 // Review request
 async function reviewRequest(outpassId) {
     try {
-        const response = await fetch(`${app.API_BASE}/staff/pending-requests`);
-        const data = await response.json();
-        const op = data.requests.find(r => r.outpass_id === outpassId);
+        let op = Array.isArray(window._staffPendingRequests)
+            ? window._staffPendingRequests.find(r => r.outpass_id === outpassId)
+            : null;
+
+        if (!op) {
+            const response = await fetch(`${app.API_BASE}/staff/pending-requests`);
+            const data = await response.json();
+            window._staffPendingRequests = data.requests || [];
+            op = window._staffPendingRequests.find(r => r.outpass_id === outpassId);
+        }
 
         if (op) {
             const parentPhone = op.parent_mobile || '';
@@ -182,7 +190,7 @@ async function reviewRequest(outpassId) {
                     <div style="display:flex;gap:1.5rem;align-items:center;margin-bottom:1.5rem;flex-wrap:wrap;justify-content:center;text-align:center;">
                         <div style="width:90px;height:90px;border-radius:50%;background:#f1f5f9;overflow:hidden;display:flex;align-items:center;justify-content:center;border:2px solid var(--primary);flex-shrink:0;">
                             ${op.profile_image
-                    ? `<img src="/uploads/${op.profile_image}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'">`
+                    ? `<img src="/uploads/${op.profile_image}" loading="lazy" decoding="async" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'">`
                     : '<i class="ph ph-user" style="font-size:2.5rem;color:#cbd5e1;"></i>'}
                         </div>
                         <div style="flex:1;min-width:200px;">
@@ -269,7 +277,7 @@ async function reviewRequest(outpassId) {
 async function approveStaffRequest(outpassId) {
     const parentCallConfirm = document.getElementById('parentCallConfirm');
     if (parentCallConfirm && !parentCallConfirm.checked) {
-        alert("Action Required: Please confirm you have called the parent by checking the verification box.");
+        app.showToast("Action Required: Please confirm you have called the parent by checking the verification box.", 'error');
         return;
     }
 
@@ -281,17 +289,17 @@ async function approveStaffRequest(outpassId) {
             body: JSON.stringify({ remarks, parent_called: true })
         });
         const data = await response.json();
-        alert(data.message);
+        app.showToast(data.message, data.success ? 'success' : 'error');
         loadModule('pending-requests');
     } catch (error) {
-        alert('Error approving request');
+        app.showToast('Error approving request', 'error');
     }
 }
 
 async function rejectStaffRequest(outpassId) {
     const remarks = document.getElementById('remarks').value;
     if (!remarks) {
-        alert('Please provide remarks');
+        app.showToast('Please provide remarks before rejecting', 'error');
         return;
     }
     try {
@@ -301,10 +309,10 @@ async function rejectStaffRequest(outpassId) {
             body: JSON.stringify({ remarks })
         });
         const data = await response.json();
-        alert(data.message);
+        app.showToast(data.message, data.success ? 'success' : 'error');
         loadModule('pending-requests');
     } catch (error) {
-        alert('Error rejecting request');
+        app.showToast('Error rejecting request', 'error');
     }
 }
 

@@ -354,12 +354,12 @@ def get_departments():
         cursor.execute("""
             SELECT 
                 d.*,
-                COUNT(DISTINCT u.user_id) as student_count,
-                COUNT(DISTINCT s.user_id) as staff_count
+                COALESCE(SUM(CASE WHEN u.role = 'student' AND u.is_active = TRUE THEN 1 ELSE 0 END), 0) as student_count,
+                COALESCE(SUM(CASE WHEN u.role = 'staff' AND u.is_active = TRUE THEN 1 ELSE 0 END), 0) as staff_count
             FROM departments d
-            LEFT JOIN users u ON d.dept_id = u.dept_id AND u.role = 'student' AND u.is_active = TRUE
-            LEFT JOIN users s ON d.dept_id = s.dept_id AND s.role = 'staff' AND s.is_active = TRUE
+            LEFT JOIN users u ON d.dept_id = u.dept_id
             GROUP BY d.dept_id
+            ORDER BY d.dept_name
         """)
         
         departments = cursor.fetchall()

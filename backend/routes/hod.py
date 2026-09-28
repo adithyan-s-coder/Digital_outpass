@@ -154,14 +154,19 @@ def approve_final(outpass_id):
         log_action(conn, outpass_id, session['user_id'], 'hod_approved', 
                   remarks, get_client_ip())
         
-        # Send notification to parent
+        # Send notification to parent asynchronously so approval response is instantaneous
         if outpass['parent_mobile']:
+            import threading
             message = (
                 f"Dear Parent, your ward {outpass['student_name']}'s outpass "
                 f"({outpass['dept_name']}) has been approved. "
                 f"Departure: {outpass['out_date']} {format_time(outpass['out_time'])}."
             )
-            send_sms_notification(outpass['parent_mobile'], message)
+            threading.Thread(
+                target=send_sms_notification,
+                args=(outpass['parent_mobile'], message),
+                daemon=True
+            ).start()
         
         cursor.close()
         conn.close()
@@ -253,47 +258,43 @@ def get_department_statistics():
         
         cursor = conn.cursor(dictionary=True)
         
-        # Get HOD's department
-        cursor.execute("SELECT dept_id FROM users WHERE user_id = %s", (session['user_id'],))
-        hod_dept = cursor.fetchone()
+        # Use session dept_id if available to avoid extra DB query
+        dept_id = session.get('dept_id')
+        if not dept_id:
+            cursor.execute("SELECT dept_id FROM users WHERE user_id = %s", (session['user_id'],))
+            hod_dept = cursor.fetchone()
+            if not hod_dept:
+                cursor.close()
+                conn.close()
+                return jsonify({'success': False, 'message': 'Department not found'}), 404
+            dept_id = hod_dept['dept_id']
+            session['dept_id'] = dept_id
         
-        if not hod_dept:
-            cursor.close()
-            conn.close()
-            return jsonify({'success': False, 'message': 'Department not found'}), 404
-        
-        dept_id = hod_dept['dept_id']
-        
-        # Total students in department
-        cursor.execute("""
-            SELECT COUNT(*) as total_students
-            FROM users
-            WHERE dept_id = %s AND role = 'student' AND is_active = TRUE
-        """, (dept_id,))
-        students = cursor.fetchone()
-        
-        # Outpass statistics
+        # Combined query for student count + outpass status counts + pending HOD count
         cursor.execute("""
             SELECT 
-                COUNT(*) as total_outpasses,
-                SUM(CASE WHEN o.final_status = 'pending' THEN 1 ELSE 0 END) as pending,
-                SUM(CASE WHEN o.final_status = 'approved' THEN 1 ELSE 0 END) as approved,
-                SUM(CASE WHEN o.final_status = 'rejected' THEN 1 ELSE 0 END) as rejected,
-                SUM(CASE WHEN o.final_status = 'used' THEN 1 ELSE 0 END) as used
-            FROM outpasses o
-            JOIN users s ON o.student_id = s.user_id
+                (SELECT COUNT(*) FROM users WHERE dept_id = %s AND role = 'student' AND is_active = TRUE) as total_students,
+                COUNT(o.outpass_id) as total_outpasses,
+                COALESCE(SUM(CASE WHEN o.final_status = 'pending' THEN 1 ELSE 0 END), 0) as pending,
+                COALESCE(SUM(CASE WHEN o.final_status = 'approved' THEN 1 ELSE 0 END), 0) as approved,
+                COALESCE(SUM(CASE WHEN o.final_status = 'rejected' THEN 1 ELSE 0 END), 0) as rejected,
+                COALESCE(SUM(CASE WHEN o.final_status = 'used' THEN 1 ELSE 0 END), 0) as used,
+                COALESCE(SUM(CASE WHEN o.hod_status = 'pending' AND o.advisor_status = 'approved' THEN 1 ELSE 0 END), 0) as pending_hod
+            FROM users s
+            LEFT JOIN outpasses o ON o.student_id = s.user_id
             WHERE s.dept_id = %s
-        """, (dept_id,))
-        outpass_stats = cursor.fetchone()
-        
-        # Pending HOD approvals
-        cursor.execute("""
-            SELECT COUNT(*) as pending_hod
-            FROM outpasses o
-            JOIN users s ON o.student_id = s.user_id
-            WHERE s.dept_id = %s AND o.hod_status = 'pending' AND o.advisor_status = 'approved'
-        """, (dept_id,))
-        pending_hod = cursor.fetchone()
+        """, (dept_id, dept_id))
+        combined = cursor.fetchone() or {}
+        students = {'total_students': int(combined.get('total_students') or 0)}
+        pending_hod = {'pending_hod': int(combined.get('pending_hod') or 0)}
+        outpass_stats = {
+            'total_outpasses': int(combined.get('total_outpasses') or 0),
+            'total': int(combined.get('total_outpasses') or 0),
+            'pending': int(combined.get('pending') or 0),
+            'approved': int(combined.get('approved') or 0),
+            'rejected': int(combined.get('rejected') or 0),
+            'used': int(combined.get('used') or 0)
+        }
         
         # Monthly trend (last 6 months)
         cursor.execute("""
