@@ -37,6 +37,7 @@ def get_all_users():
                 u.registration_no,
                 u.academic_year,
                 u.phone,
+                u.profile_image,
                 u.is_active,
                 u.created_at,
                 d.dept_name,
@@ -62,6 +63,8 @@ def get_all_users():
             user['created_at'] = format_datetime(user['created_at'])
             if not user.get('full_name'):
                 user['full_name'] = user.get('username') or 'User'
+            if user.get('profile_image'):
+                user['profile_image'] = user['profile_image'].replace('uploads/', '', 1).lstrip('/')
         
         return jsonify({
             'success': True,

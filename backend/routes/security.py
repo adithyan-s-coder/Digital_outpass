@@ -338,6 +338,7 @@ def get_recent_activity():
                 s.full_name as student_name,
                 s.registration_no,
                 s.academic_year,
+                s.profile_image,
                 d.dept_name,
                 o.reason,
                 o.destination
@@ -366,6 +367,8 @@ def get_recent_activity():
             activity['actual_exit_time'] = format_datetime(activity['actual_exit_time'])
             activity['actual_entry_time'] = format_datetime(activity['actual_entry_time'])
             activity['expected_return_time'] = format_time(activity['expected_return_time'])
+            if activity.get('profile_image'):
+                activity['profile_image'] = activity['profile_image'].replace('uploads/', '', 1).lstrip('/')
         
         cursor.close()
         conn.close()
@@ -401,6 +404,7 @@ def get_students_currently_out():
                 s.registration_no,
                 s.academic_year,
                 s.phone as student_phone,
+                s.profile_image,
                 d.dept_name,
                 o.destination
             FROM outpasses o
@@ -459,6 +463,8 @@ def get_students_currently_out():
             student['out_time'] = format_time(student['out_time'])
             student['expected_return_time'] = format_time(student['expected_return_time'])
             student['actual_exit_time'] = format_datetime(student['actual_exit_time'])
+            if student.get('profile_image'):
+                student['profile_image'] = student['profile_image'].replace('uploads/', '', 1).lstrip('/')
         
         cursor.close()
         conn.close()

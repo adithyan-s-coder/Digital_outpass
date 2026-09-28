@@ -280,7 +280,8 @@ def get_student_history(student_id):
                 'registration_no': student['registration_no'],
                 'email': student['email'],
                 'academic_year': student.get('academic_year'),
-                'dept_name': student.get('dept_name', 'N/A')
+                'dept_name': student.get('dept_name', 'N/A'),
+                'profile_image': student['profile_image'].replace('uploads/', '', 1).lstrip('/') if student.get('profile_image') else None
             },
             'history': history
         }), 200
@@ -309,6 +310,7 @@ def get_my_students():
                 u.phone,
                 u.academic_year,
                 u.parent_mobile,
+                u.profile_image,
                 d.dept_name,
                 COUNT(o.outpass_id) as total_outpasses,
                 SUM(CASE WHEN o.final_status = 'pending' THEN 1 ELSE 0 END) as pending_count
@@ -321,6 +323,9 @@ def get_my_students():
         """, (session['user_id'],))
         
         students = cursor.fetchall()
+        for s in students:
+            if s.get('profile_image'):
+                s['profile_image'] = s['profile_image'].replace('uploads/', '', 1).lstrip('/')
         
         cursor.close()
         conn.close()

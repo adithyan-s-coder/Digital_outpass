@@ -35,6 +35,14 @@ CREATE TABLE IF NOT EXISTS users (
 -- Migration for existing databases
 ALTER TABLE users ADD COLUMN profile_image VARCHAR(255) AFTER parent_mobile;
 
+-- Persistent Cloud File Storage Table (ensures profile photos persist across Render/Vercel restarts & all devices)
+CREATE TABLE IF NOT EXISTS uploaded_files (
+    file_path VARCHAR(255) PRIMARY KEY,
+    mime_type VARCHAR(64) NOT NULL DEFAULT 'image/jpeg',
+    file_data MEDIUMBLOB NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
 -- Outpasses Table
 CREATE TABLE IF NOT EXISTS outpasses (
     outpass_id INT PRIMARY KEY AUTO_INCREMENT,

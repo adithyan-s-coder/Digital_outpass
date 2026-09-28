@@ -101,14 +101,67 @@ def serve_static(path):
 
 @app.route('/uploads/<path:filename>')
 def serve_upload(filename):
-    """Serve uploaded files from primary upload folder or repository fallback"""
-    primary_folder = app.config['UPLOAD_FOLDER']
-    if os.path.exists(os.path.join(primary_folder, filename)):
-        return send_from_directory(primary_folder, filename)
-    fallback_folder = app.config.get('DEFAULT_UPLOAD_FOLDER')
-    if fallback_folder and os.path.exists(os.path.join(fallback_folder, filename)):
-        return send_from_directory(fallback_folder, filename)
-    return send_from_directory(primary_folder, filename)
+    """
+    Serve uploaded files from local disk cache or MySQL uploaded_files table.
+    If an older pre-fix upload was wiped by an ephemeral cloud container, returns a crisp SVG initial avatar.
+    """
+    from flask import Response
+    from backend.config import get_uploaded_file, get_db_connection
+
+    file_bytes, mime_type = get_uploaded_file(filename)
+    if file_bytes:
+        return Response(
+            file_bytes,
+            mimetype=mime_type or 'image/jpeg',
+            headers={'Cache-Control': 'public, max-age=86400, s-maxage=604800, stale-while-revalidate=86400'}
+        )
+
+    # Graceful SVG avatar fallback when an older container-local file was lost before DB persistence
+    initials = "U"
+    try:
+        basename = os.path.basename(filename)
+        conn = get_db_connection()
+        if conn:
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute(
+                "SELECT full_name, username FROM users WHERE profile_image LIKE %s LIMIT 1",
+                (f"%{basename}",)
+            )
+            row = cursor.fetchone()
+            cursor.close()
+            conn.close()
+            if row:
+                name = (row.get('full_name') or row.get('username') or 'U').strip()
+                parts = [p for p in name.split() if p]
+                if len(parts) >= 2:
+                    initials = (parts[0][0] + parts[-1][0]).upper()
+                elif parts:
+                    initials = parts[0][:2].upper()
+        if initials == "U":
+            # Derive from filename pattern e.g. staff_username_photo.jpg
+            stem = os.path.splitext(basename)[0]
+            tokens = [t for t in stem.split('_') if t and t.lower() not in ('student', 'staff', 'hod', 'security', 'admin', 'captured', 'id', 'profile')]
+            if tokens:
+                initials = tokens[0][:2].upper()
+    except Exception:
+        pass
+
+    svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200">
+        <defs>
+            <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#059669"/>
+                <stop offset="100%" stop-color="#0d9488"/>
+            </linearGradient>
+        </defs>
+        <rect width="200" height="200" rx="24" fill="url(#g)"/>
+        <text x="50%" y="54%" dominant-baseline="middle" text-anchor="middle"
+              fill="#ffffff" font-family="Outfit, Inter, sans-serif" font-weight="700" font-size="76">{initials}</text>
+    </svg>'''
+    return Response(
+        svg,
+        mimetype='image/svg+xml',
+        headers={'Cache-Control': 'no-cache, max-age=0'}
+    )
 
 # Error handlers
 @app.errorhandler(404)

@@ -457,6 +457,7 @@ def get_all_department_outpasses():
                 s.registration_no,
                 s.academic_year,
                 s.parent_mobile,
+                s.profile_image,
                 a.full_name as advisor_name,
                 d.dept_name
             FROM outpasses o
@@ -484,12 +485,14 @@ def get_all_department_outpasses():
         cursor.execute(query, params)
         outpasses = cursor.fetchall()
         
-        # Format dates
+        # Format dates and normalize profile_image
         for op in outpasses:
             op['out_date'] = format_date(op['out_date'])
             op['out_time'] = format_time(op['out_time'])
             op['expected_return_time'] = format_time(op['expected_return_time'])
             op['created_at'] = format_datetime(op['created_at'])
+            if op.get('profile_image'):
+                op['profile_image'] = op['profile_image'].replace('uploads/', '', 1).lstrip('/')
         
         cursor.close()
         conn.close()

@@ -1,5 +1,38 @@
 // Smart Outpass Management System - Main App JavaScript
 
+// Normalize profile image path to /uploads/...
+function getAvatarUrl(profileImage) {
+    if (!profileImage) return null;
+    const str = String(profileImage).trim();
+    if (!str) return null;
+    if (str.startsWith('http://') || str.startsWith('https://') || str.startsWith('data:')) {
+        return str;
+    }
+    const clean = str.replace(/^\/+/, '').replace(/^uploads\/+/, '');
+    return `/uploads/${clean}`;
+}
+
+function getUserInitials(fullName) {
+    const raw = String(fullName || 'U').trim();
+    if (!raw) return 'U';
+    const parts = raw.split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) {
+        return (parts[0][0] + parts[1][0]).toUpperCase();
+    }
+    return parts[0].substring(0, 2).toUpperCase();
+}
+
+// Render an error-proof avatar with initials fallback underneath the image
+function getAvatarHtml(profileImage, fullName, size = 40, borderRadius = '12px') {
+    const initials = getUserInitials(fullName);
+    const url = getAvatarUrl(profileImage);
+    const fontSize = Math.max(12, Math.round(size * 0.38));
+    const imgHtml = url
+        ? `<img src="${url}" alt="${initials}" loading="lazy" decoding="async" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:${borderRadius};" onerror="this.remove()">`
+        : '';
+    return `<div style="width:${size}px;height:${size}px;border-radius:${borderRadius};background:linear-gradient(135deg,#059669,#047857);color:#ffffff;display:inline-flex;align-items:center;justify-content:center;font-weight:700;font-size:${fontSize}px;position:relative;overflow:hidden;flex-shrink:0;box-shadow:0 2px 6px rgba(5,150,105,0.2);">${initials}${imgHtml}</div>`;
+}
+
 // Global app configuration and utilities
 var app = window.app = {
     API_BASE: '/api',
@@ -11,6 +44,9 @@ var app = window.app = {
     getStatusBadge: getStatusBadge,
     showQRModal: showQRModal,
     showToast: showToast,
+    getAvatarUrl: getAvatarUrl,
+    getUserInitials: getUserInitials,
+    getAvatarHtml: getAvatarHtml,
     _apiCache: new Map(),
     _inflightRequests: new Map(),
     clearApiCache: function () {
@@ -576,14 +612,14 @@ async function handleRegister(e) {
         return;
     }
 
+    // Attach camera-captured photo if used (works for all roles: student, staff, hod, security, admin)
+    let profileImg = formData.get('profile_image');
+    if (capturedPhotoBlob) {
+        profileImg = new File([capturedPhotoBlob], 'captured_id.jpg', { type: 'image/jpeg' });
+        formData.set('profile_image', profileImg);
+    }
+
     if (role === 'student') {
-        let profileImg = formData.get('profile_image');
-
-        if (capturedPhotoBlob) {
-            profileImg = new File([capturedPhotoBlob], 'captured_id.jpg', { type: 'image/jpeg' });
-            formData.set('profile_image', profileImg);
-        }
-
         if (!profileImg || profileImg.size === 0) {
             showError(errorEl, 'Institutional ID Card photo is mandatory for students');
             return;
@@ -653,6 +689,65 @@ async function loadDepartments() {
     }
 }
 
+// Render sidebar avatar with image + emerald initial fallback + 1-click upload
+function renderSidebarAvatar() {
+    const userAvatar = document.getElementById('userAvatar');
+    if (!userAvatar || !currentUser) return;
+
+    const fullName = currentUser.full_name || currentUser.username || 'User';
+    const initials = getUserInitials(fullName);
+    const avatarUrl = getAvatarUrl(currentUser.profile_image);
+
+    userAvatar.style.backgroundImage = 'none';
+    userAvatar.style.background = 'linear-gradient(135deg, #059669, #047857)';
+    userAvatar.style.color = '#ffffff';
+    userAvatar.style.position = 'relative';
+    userAvatar.style.overflow = 'hidden';
+    userAvatar.style.cursor = 'pointer';
+
+    if (avatarUrl) {
+        userAvatar.innerHTML = `
+            <span style="font-size: 15px; font-weight: 700;">${initials}</span>
+            <img src="${avatarUrl}" alt="${fullName}" decoding="async"
+                 style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: 12px;"
+                 onerror="this.remove()">
+        `;
+    } else {
+        userAvatar.innerHTML = `<span style="font-size: 15px; font-weight: 700;">${initials}</span>`;
+    }
+
+    const fileInput = document.getElementById('sidebarAvatarInput');
+    if (fileInput && !fileInput.dataset.bound) {
+        fileInput.dataset.bound = '1';
+        userAvatar.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', async function () {
+            if (!this.files || !this.files[0]) return;
+            const file = this.files[0];
+            const formData = new FormData();
+            formData.append('profile_image', file);
+            try {
+                showToast('Uploading profile photo...', 'info');
+                const resp = await fetch(`${app.API_BASE}/auth/profile-image`, {
+                    method: 'POST',
+                    body: formData
+                });
+                const res = await resp.json();
+                if (res.success && res.profile_image) {
+                    currentUser.profile_image = `${res.profile_image}?t=${Date.now()}`;
+                    renderSidebarAvatar();
+                    showToast('Profile photo updated across all devices!', 'success');
+                } else {
+                    showToast(res.message || 'Failed to update profile photo', 'error');
+                }
+            } catch (err) {
+                showToast('Network error uploading photo', 'error');
+            } finally {
+                this.value = '';
+            }
+        });
+    }
+}
+
 // Show dashboard based on user role
 function showDashboard() {
     try {
@@ -684,20 +779,8 @@ function showDashboard() {
         const activeMenu = document.getElementById(activeMenuId);
         if (activeMenu) activeMenu.style.display = 'block';
 
-        // Update avatar
-        const userAvatar = document.getElementById('userAvatar');
-        if (userAvatar) {
-            if (currentUser.profile_image) {
-                userAvatar.style.backgroundImage = `url(/uploads/${currentUser.profile_image})`;
-                userAvatar.style.backgroundSize = 'cover';
-                userAvatar.style.backgroundPosition = 'center';
-                userAvatar.textContent = '';
-            } else {
-                userAvatar.style.backgroundImage = 'none';
-                userAvatar.style.background = '#e2e8f0';
-                userAvatar.textContent = '👤';
-            }
-        }
+        // Update avatar with database-backed image and fallback initials
+        renderSidebarAvatar();
 
         // Load default module or restore previous one
         const savedModule = localStorage.getItem('currentModule');

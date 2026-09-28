@@ -145,15 +145,12 @@ async function loadManageUsers() {
                     (user.dept_code || '-');
 
                 const displayName = (user.full_name || user.username || 'User').trim();
-                const initial = displayName.charAt(0).toUpperCase();
 
                 html += `
                     <tr data-role="${user.role}">
                         <td>
                             <div style="display: flex; align-items: center; gap: 12px;">
-                                <div style="width: 36px; height: 36px; border-radius: 50%; background: #f1f5f9; display: flex; align-items: center; justify-content: center; font-weight: 700; color: var(--primary);">
-                                    ${initial}
-                                </div>
+                                ${app.getAvatarHtml(user.profile_image, displayName, 38, '50%')}
                                 <div>
                                     <div style="font-weight: 600;">${displayName}</div>
                                     <div style="font-size: 12px; color: var(--text-muted);">${user.registration_no || ''}</div>

@@ -249,11 +249,8 @@ async function verifyQRCodeFromScan(qrCode) {
                     <div style="font-size: 48px; margin-bottom: 16px;">${isReturning ? '🏠' : '✓'}</div>
                     <h3 style="margin-bottom: 20px;">${isReturning ? 'Returning Student' : 'Valid Outpass'}</h3>
                     
-                    <div class="scan-profile-container">
-                        ${data.student.profile_image ?
-                    `<img src="/uploads/${data.student.profile_image}" loading="lazy" decoding="async" class="scan-profile-img" onerror="this.src='https://ui-avatars.com/api/?name=${encodeURIComponent(data.student.name)}&background=random'">` :
-                    `<div class="scan-profile-placeholder"><i class="ph ph-user"></i></div>`
-                }
+                    <div style="display: flex; justify-content: center; margin: 0 auto 20px;">
+                        ${app.getAvatarHtml(data.student.profile_image, data.student.name, 96, '50%')}
                     </div>
 
                     <div style="text-align: left; background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
@@ -318,11 +315,8 @@ async function recordExit(qrCode) {
                     <div style="font-size: 48px; color: var(--success); margin-bottom: 16px;">✓</div>
                     <h3 style="margin-bottom: 8px; color: #065f46;">Record Updated</h3>
                     
-                    <div class="scan-profile-container" style="width: 80px; height: 80px;">
-                         ${data.student.profile_image ?
-                    `<img src="/uploads/${data.student.profile_image}" loading="lazy" decoding="async" class="scan-profile-img" onerror="this.src='https://ui-avatars.com/api/?name=${encodeURIComponent(data.student.name)}&background=random'">` :
-                    `<div class="scan-profile-placeholder"><i class="ph ph-user"></i></div>`
-                }
+                    <div style="display: flex; justify-content: center; margin: 0 auto 16px;">
+                        ${app.getAvatarHtml(data.student.profile_image, data.student.name, 80, '50%')}
                     </div>
 
                     <p style="color: #065f46; margin-bottom: 24px;">Exit recorded for ${data.student.name}</p>
@@ -378,8 +372,13 @@ async function loadStudentsOut() {
                     html += `
                         <tr>
                             <td>
-                                <div style="font-weight: 600;">${student.student_name}</div>
-                                <div style="font-size: 12px; color: var(--text-muted);">${student.registration_no}</div>
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    ${app.getAvatarHtml(student.profile_image, student.student_name, 36, '10px')}
+                                    <div>
+                                        <div style="font-weight: 600;">${student.student_name}</div>
+                                        <div style="font-size: 12px; color: var(--text-muted);">${student.registration_no}</div>
+                                    </div>
+                                </div>
                             </td>
                             <td>
                 <div style="font-weight: 600; color: var(--secondary); font-size: 13px;">${app.formatYear(student.academic_year)}</div>
@@ -491,8 +490,13 @@ async function loadRecentActivity() {
                     html += `
                         <tr>
                             <td>
-                                <div style="font-weight: 600;">${activity.student_name}</div>
-                                <div style="font-size: 12px; color: var(--text-muted);">${activity.registration_no}</div>
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    ${app.getAvatarHtml(activity.profile_image, activity.student_name, 36, '10px')}
+                                    <div>
+                                        <div style="font-weight: 600;">${activity.student_name}</div>
+                                        <div style="font-size: 12px; color: var(--text-muted);">${activity.registration_no}</div>
+                                    </div>
+                                </div>
                             </td>
                             <td>
                 <div style="font-weight: 600; color: var(--secondary); font-size: 13px;">${app.formatYear(activity.academic_year)}</div>

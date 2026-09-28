@@ -311,29 +311,30 @@ def register():
         # Hash password
         password_hash = hash_password(data['password'])
         
-        # Handle profile image upload (compress & resize for fast page loads)
+        # Handle profile image upload (compress, resize & persist to MySQL + disk cache)
         profile_image_path = None
         if profile_file and profile_file.filename:
-            from backend.config import app, allowed_file
+            from backend.config import app, allowed_file, save_uploaded_file
             if allowed_file(profile_file.filename):
                 identifier = data.get('registration_no') or data['username']
                 base_name = os.path.splitext(secure_filename(profile_file.filename))[0]
                 filename = secure_filename(f"{role}_{identifier}_{base_name}.jpg")
-                profiles_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'profiles')
-                os.makedirs(profiles_dir, exist_ok=True)
-                upload_path = os.path.join(profiles_dir, filename)
+                profile_image_path = f"profiles/{filename}"
                 try:
                     from PIL import Image
+                    import io
                     profile_file.seek(0)
                     img = Image.open(profile_file)
                     if img.mode in ('RGBA', 'P'):
                         img = img.convert('RGB')
                     img.thumbnail((800, 800), Image.Resampling.LANCZOS)
-                    img.save(upload_path, format='JPEG', quality=82, optimize=True)
+                    buf = io.BytesIO()
+                    img.save(buf, format='JPEG', quality=82, optimize=True)
+                    img_bytes = buf.getvalue()
                 except Exception:
                     profile_file.seek(0)
-                    profile_file.save(upload_path)
-                profile_image_path = f"profiles/{filename}"
+                    img_bytes = profile_file.read()
+                save_uploaded_file(profile_image_path, img_bytes, 'image/jpeg')
         
         # Get database connection
         conn = get_db_connection()
@@ -394,6 +395,78 @@ def register():
     except Exception as e:
         print(f"Registration error: {e}")
         return jsonify({'success': False, 'message': f'Registration failed: {str(e)}'}), 500
+
+
+@auth_bp.route('/profile-image', methods=['POST'])
+def update_profile_image():
+    """
+    Upload or update profile photo for the currently logged-in user (all roles).
+    Persists image in MySQL uploaded_files table so it is visible across all devices & cloud restarts.
+    """
+    try:
+        if 'user_id' not in session:
+            return jsonify({'success': False, 'message': 'Not logged in'}), 401
+
+        profile_file = request.files.get('profile_image')
+        if not profile_file or not profile_file.filename:
+            return jsonify({'success': False, 'message': 'Please select an image file'}), 400
+
+        from backend.config import allowed_image_file, save_uploaded_file
+        if not allowed_image_file(profile_file.filename):
+            return jsonify({'success': False, 'message': 'Only JPG and PNG images are allowed'}), 400
+
+        import time, io
+        from PIL import Image
+
+        user_id = session['user_id']
+        role = session.get('role', 'user')
+        username = session.get('username', str(user_id))
+        ts = int(time.time())
+        filename = secure_filename(f"{role}_{username}_{ts}.jpg")
+        profile_image_path = f"profiles/{filename}"
+
+        try:
+            profile_file.seek(0)
+            img = Image.open(profile_file)
+            if img.mode in ('RGBA', 'P'):
+                img = img.convert('RGB')
+            img.thumbnail((800, 800), Image.Resampling.LANCZOS)
+            buf = io.BytesIO()
+            img.save(buf, format='JPEG', quality=82, optimize=True)
+            img_bytes = buf.getvalue()
+        except Exception:
+            profile_file.seek(0)
+            img_bytes = profile_file.read()
+
+        save_uploaded_file(profile_image_path, img_bytes, 'image/jpeg')
+
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({'success': False, 'message': 'Database connection failed'}), 500
+
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE users SET profile_image = %s WHERE user_id = %s",
+            (profile_image_path, user_id)
+        )
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        session['profile_image'] = profile_image_path
+        if session.get('user_data'):
+            user_data = dict(session['user_data'])
+            user_data['profile_image'] = profile_image_path
+            session['user_data'] = user_data
+
+        return jsonify({
+            'success': True,
+            'message': 'Profile photo updated across all devices!',
+            'profile_image': profile_image_path
+        }), 200
+    except Exception as e:
+        print(f"Profile photo update error: {e}")
+        return jsonify({'success': False, 'message': 'Failed to update profile photo'}), 500
 
 @auth_bp.route('/change-password', methods=['POST'])
 def change_password():

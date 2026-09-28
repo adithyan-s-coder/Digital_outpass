@@ -306,9 +306,18 @@ def init_db(force=False):
                 cursor.fetchall()
                 cursor.execute("SELECT actual_exit_time FROM outpasses LIMIT 1")
                 cursor.fetchall()
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS uploaded_files (
+                        file_path VARCHAR(255) PRIMARY KEY,
+                        mime_type VARCHAR(64) NOT NULL DEFAULT 'image/jpeg',
+                        file_data MEDIUMBLOB NOT NULL,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                    )
+                """)
                 if existing_users > 0:
                     cursor.close()
                     conn.close()
+                    sync_local_uploads_to_db()
                     print("[OK] Database schema already initialized (fast-path verified)")
                     return True
             except Exception:
@@ -330,6 +339,19 @@ def init_db(force=False):
                         else:
                             print(f"[WARN] Schema statement failed: {err.msg}")
             print("[OK] Database schema verified/initialized")
+
+        # Ensure uploaded_files table exists for cloud profile photo persistence
+        try:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS uploaded_files (
+                    file_path VARCHAR(255) PRIMARY KEY,
+                    mime_type VARCHAR(64) NOT NULL DEFAULT 'image/jpeg',
+                    file_data MEDIUMBLOB NOT NULL,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                )
+            """)
+        except Exception as uf_err:
+            print(f"[WARN] uploaded_files table creation skipped: {uf_err}")
 
         # Migration: Add academic_year to users if missing
         try:
@@ -375,6 +397,7 @@ def init_db(force=False):
         conn.commit()
         cursor.close()
         conn.close()
+        sync_local_uploads_to_db()
         return True
     except Exception as e:
         print(f"[ERROR] Error during DB init: {e}")
@@ -382,7 +405,7 @@ def init_db(force=False):
             conn.close()
         return False
 
-# File Handling (supports read-only serverless filesystems like Vercel via /tmp/uploads)
+# File Handling (supports read-only serverless filesystems like Vercel via /tmp/uploads + MySQL persistence)
 DEFAULT_UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
 if os.environ.get('VERCEL'):
     UPLOAD_FOLDER = '/tmp/uploads'
@@ -398,6 +421,158 @@ except OSError:
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['DEFAULT_UPLOAD_FOLDER'] = DEFAULT_UPLOAD_FOLDER
+
+_uploaded_files_table_ready = False
+
+def ensure_uploaded_files_table(conn=None):
+    """Ensures the uploaded_files table exists in MySQL."""
+    global _uploaded_files_table_ready
+    if _uploaded_files_table_ready:
+        return True
+    own_conn = False
+    if conn is None:
+        conn = get_db_connection()
+        own_conn = True
+    if not conn:
+        return False
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS uploaded_files (
+                file_path VARCHAR(255) PRIMARY KEY,
+                mime_type VARCHAR(64) NOT NULL DEFAULT 'image/jpeg',
+                file_data MEDIUMBLOB NOT NULL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            )
+        """)
+        conn.commit()
+        cursor.close()
+        _uploaded_files_table_ready = True
+        return True
+    except Exception as e:
+        print(f"[WARN] ensure_uploaded_files_table error: {e}")
+        return False
+    finally:
+        if own_conn and conn:
+            conn.close()
+
+
+def save_uploaded_file(rel_path, raw_bytes, mime_type='image/jpeg'):
+    """
+    Saves an uploaded file both to local disk cache AND to MySQL uploaded_files table
+    so profile photos persist across Render container restarts, Vercel functions, and all devices.
+    """
+    clean_path = rel_path.replace('\\', '/').lstrip('/')
+    # 1. Save to local disk cache
+    try:
+        disk_path = os.path.join(app.config['UPLOAD_FOLDER'], *clean_path.split('/'))
+        os.makedirs(os.path.dirname(disk_path), exist_ok=True)
+        with open(disk_path, 'wb') as f:
+            f.write(raw_bytes)
+    except Exception as disk_err:
+        print(f"[WARN] Disk cache write failed for {clean_path}: {disk_err}")
+
+    # 2. Save to MySQL uploaded_files table
+    conn = get_db_connection()
+    if conn:
+        try:
+            ensure_uploaded_files_table(conn)
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO uploaded_files (file_path, mime_type, file_data)
+                VALUES (%s, %s, %s)
+                ON DUPLICATE KEY UPDATE
+                    mime_type = VALUES(mime_type),
+                    file_data = VALUES(file_data)
+            """, (clean_path, mime_type, raw_bytes))
+            conn.commit()
+            cursor.close()
+        except Exception as db_err:
+            print(f"[WARN] DB file persist failed for {clean_path}: {db_err}")
+        finally:
+            conn.close()
+
+
+def get_uploaded_file(rel_path):
+    """
+    Retrieves file bytes & mime_type from local disk cache or MySQL uploaded_files table.
+    Automatically restores MySQL-backed files to local disk cache for 0ms repeat access.
+    """
+    clean_path = rel_path.replace('\\', '/').lstrip('/')
+    ext = os.path.splitext(clean_path)[1].lower()
+    default_mime = 'image/png' if ext == '.png' else ('application/pdf' if ext == '.pdf' else 'image/jpeg')
+
+    # 1. Check local disk cache first
+    for base_folder in (app.config.get('UPLOAD_FOLDER'), app.config.get('DEFAULT_UPLOAD_FOLDER')):
+        if not base_folder:
+            continue
+        candidate = os.path.join(base_folder, *clean_path.split('/'))
+        if os.path.isfile(candidate):
+            try:
+                with open(candidate, 'rb') as f:
+                    return f.read(), default_mime
+            except Exception:
+                pass
+
+    # 2. Fetch from MySQL uploaded_files table if wiped from ephemeral disk
+    conn = get_db_connection()
+    if conn:
+        try:
+            ensure_uploaded_files_table(conn)
+            cursor = conn.cursor()
+            basename = os.path.basename(clean_path)
+            cursor.execute("""
+                SELECT file_data, mime_type
+                FROM uploaded_files
+                WHERE file_path = %s OR file_path = %s OR file_path LIKE %s
+                LIMIT 1
+            """, (clean_path, f"profiles/{basename}", f"%/{basename}"))
+            row = cursor.fetchone()
+            cursor.close()
+            if row and row[0]:
+                file_bytes = bytes(row[0]) if not isinstance(row[0], bytes) else row[0]
+                mime_type = row[1] or default_mime
+                # Restore to local disk cache for fast future hits
+                try:
+                    disk_path = os.path.join(app.config['UPLOAD_FOLDER'], *clean_path.split('/'))
+                    os.makedirs(os.path.dirname(disk_path), exist_ok=True)
+                    with open(disk_path, 'wb') as f:
+                        f.write(file_bytes)
+                except Exception:
+                    pass
+                return file_bytes, mime_type
+        except Exception as db_err:
+            print(f"[WARN] DB file lookup failed for {clean_path}: {db_err}")
+        finally:
+            conn.close()
+
+    return None, None
+
+
+def sync_local_uploads_to_db():
+    """Syncs any existing files in local uploads/ folder into MySQL uploaded_files table."""
+    try:
+        for base_folder in (app.config.get('DEFAULT_UPLOAD_FOLDER'), app.config.get('UPLOAD_FOLDER')):
+            if not base_folder or not os.path.isdir(base_folder):
+                continue
+            for root, _, files in os.walk(base_folder):
+                for fname in files:
+                    if not allowed_file(fname):
+                        continue
+                    full_path = os.path.join(root, fname)
+                    rel_path = os.path.relpath(full_path, base_folder).replace('\\', '/')
+                    try:
+                        with open(full_path, 'rb') as f:
+                            raw = f.read()
+                        if raw:
+                            ext = os.path.splitext(fname)[1].lower()
+                            mime = 'image/png' if ext == '.png' else 'image/jpeg'
+                            save_uploaded_file(rel_path, raw, mime)
+                    except Exception:
+                        pass
+    except Exception as e:
+        print(f"[WARN] sync_local_uploads_to_db skipped: {e}")
+
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in {'png', 'jpg', 'jpeg', 'pdf'}

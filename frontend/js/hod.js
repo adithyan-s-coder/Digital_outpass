@@ -118,9 +118,7 @@ async function loadHODApprovals() {
                         <tr style="transition: background-color 0.15s linear;">
                             <td>
                                 <div style="display: flex; align-items: center; gap: 12px;">
-                                    <div style="width: 40px; height: 40px; border-radius: 12px; background: rgba(5, 150, 105, 0.05); color: var(--primary); display: flex; align-items: center; justify-content: center; font-weight: 700;">
-                                        ${req.student_name.charAt(0)}
-                                    </div>
+                                    ${app.getAvatarHtml(req.profile_image, req.student_name, 40, '12px')}
                                     <div>
                                         <div style="font-weight: 700; color: var(--text-main);">${req.student_name}</div>
                                         <div style="font-size: 11px; color: var(--text-muted); font-family: monospace;">${req.registration_no}</div>
@@ -201,11 +199,9 @@ async function reviewHODRequest(outpassId) {
         if (op) {
             document.getElementById('moduleContent').innerHTML = `
                 <div class="glass-panel" style="max-width: 850px; margin: 0 auto; border: none;">
-                    <div style="display: flex; gap: 40px; align-items: start; margin-bottom: 40px; border-bottom: 1px solid #f1f5f9; padding-bottom: 32px;">
-                        <div style="width: 160px; height: 160px; border-radius: 24px; background: #f8fafc; overflow: hidden; display: flex; align-items: center; justify-content: center; border: 3px solid #f1f5f9; box-shadow: var(--shadow-md);">
-                            ${op.profile_image ? `<img src="/uploads/${op.profile_image}" loading="lazy" decoding="async" style="width: 100%; height: 100%; object-fit: cover;" onerror="this.style.display='none'">` : '<i class="ph ph-user-circle" style="font-size: 80px; color: #cbd5e1;"></i>'}
-                        </div>
-                        <div style="flex: 1;">
+                    <div style="display: flex; gap: 40px; align-items: start; margin-bottom: 40px; border-bottom: 1px solid #f1f5f9; padding-bottom: 32px; flex-wrap: wrap;">
+                        ${app.getAvatarHtml(op.profile_image, op.student_name, 160, '24px')}
+                        <div style="flex: 1; min-width: 240px;">
                             <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px;">
                                 <h2 style="font-size: 32px; font-weight: 800; letter-spacing: -0.02em; color: var(--text-main);">Verification Center</h2>
                                 <span class="status-badge badge-pending">Final Audit</span>
@@ -461,9 +457,7 @@ async function loadAllOutpasses() {
                         <tr style="cursor: pointer; transition: background-color 0.15s;" onclick="reviewHODRequest(${op.outpass_id})">
                             <td>
                                 <div style="display: flex; align-items: center; gap: 14px;">
-                                    <div style="width: 44px; height: 44px; border-radius: 12px; background: #eef2ff; color: var(--primary); display: flex; align-items: center; justify-content: center;">
-                                        <i class="ph ph-student" style="font-size: 20px;"></i>
-                                    </div>
+                                    ${app.getAvatarHtml(op.profile_image, op.student_name, 44, '12px')}
                                     <div>
                                         <div style="font-weight: 700; color: var(--text-main); font-size: 15px;">${op.student_name}</div>
                                         <div style="font-size: 12px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; font-weight: 600;">#${op.registration_no}</div>
